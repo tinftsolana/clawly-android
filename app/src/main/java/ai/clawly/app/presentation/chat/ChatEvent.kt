@@ -1,0 +1,14 @@
+package ai.clawly.app.presentation.chat
+
+/**
+ * One-time events from ChatViewModel
+ */
+sealed class ChatEvent {
+    data object ShowPaywall : ChatEvent()
+    data object ShowConfigPrompt : ChatEvent()
+    data object ShowProviderSetup : ChatEvent()
+    data class ShowError(val message: String) : ChatEvent()
+    data object ScrollToBottom : ChatEvent()
+    data object MessageSent : ChatEvent()
+    data class SpeakText(val text: String) : ChatEvent()
+}

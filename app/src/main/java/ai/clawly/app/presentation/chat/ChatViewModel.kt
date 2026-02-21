@@ -1,0 +1,633 @@
+package ai.clawly.app.presentation.chat
+
+import ai.clawly.app.BuildConfig
+import ai.clawly.app.analytics.AmplitudeAnalyticsService
+import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.remote.gateway.GatewayService
+import ai.clawly.app.domain.manager.SkillsManager
+import ai.clawly.app.domain.model.*
+import ai.clawly.app.domain.repository.AuthProviderRepository
+import ai.clawly.app.domain.repository.ChatRepository
+import ai.clawly.app.domain.repository.AttachmentPayload
+import ai.clawly.app.domain.usecase.GatewayConnectionUseCase
+import ai.clawly.app.domain.usecase.GetUserIdentityUseCase
+import ai.clawly.app.domain.usecase.UserIdentity
+import ai.clawly.app.domain.usecase.Web3CreditsUseCase
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import javax.inject.Inject
+
+private const val TAG = "ChatViewModel"
+
+@HiltViewModel
+class ChatViewModel @Inject constructor(
+    private val gatewayService: GatewayService,
+    private val chatRepository: ChatRepository,
+    private val authProviderRepository: AuthProviderRepository,
+    private val preferences: GatewayPreferences,
+    private val analytics: AmplitudeAnalyticsService,
+    private val skillsManager: SkillsManager,
+    private val getUserIdentityUseCase: GetUserIdentityUseCase,
+    private val web3CreditsUseCase: Web3CreditsUseCase,
+    private val gatewayConnectionUseCase: GatewayConnectionUseCase
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(ChatUiState())
+    val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    private val _events = MutableSharedFlow<ChatEvent>()
+    val events: SharedFlow<ChatEvent> = _events.asSharedFlow()
+
+    // Free message limit for non-premium users
+    private val freeMessageLimit = 2
+
+    // Last user message for retry
+    private var lastUserMessage: String? = null
+    private var hasLoadedHistory = false
+
+    // Response timeout
+    private var timeoutJob: Job? = null
+
+    val assistantName = "Clawly"
+
+    private val _userIdentity = MutableStateFlow<UserIdentity>(UserIdentity.NotAuthenticated)
+    val userIdentity: StateFlow<UserIdentity> = _userIdentity.asStateFlow()
+
+    private val _web3Credits = MutableStateFlow(0)
+    val web3Credits: StateFlow<Int> = _web3Credits.asStateFlow()
+
+    init {
+        loadPersistedMessages()
+        loadThinkingLevel()
+        setupSubscriptions()
+        if (BuildConfig.IS_WEB3) {
+            observeWeb3Credits()
+        }
+    }
+
+    private fun observeWeb3Credits() {
+        viewModelScope.launch {
+            web3CreditsUseCase.creditsFlow.collect { credits ->
+                _web3Credits.value = credits
+                Log.d(TAG, "Web3 credits updated: $credits")
+            }
+        }
+    }
+
+    private fun loadPersistedMessages() {
+        viewModelScope.launch {
+            val messages = chatRepository.loadMessages()
+            _uiState.update { it.copy(messages = messages) }
+        }
+    }
+
+    private fun loadThinkingLevel() {
+        viewModelScope.launch {
+            val level = ThinkingLevel.fromString(preferences.getThinkingLevelSync())
+            _uiState.update { it.copy(thinkingLevel = level) }
+        }
+    }
+
+    private fun setupSubscriptions() {
+        // Observe connection status from shared singleton
+        viewModelScope.launch {
+            gatewayConnectionUseCase.connectionStatus.collect { status ->
+                val wasOffline = _uiState.value.connectionStatus != ConnectionStatus.Online
+                _uiState.update { it.copy(connectionStatus = status) }
+                when (status) {
+                    is ConnectionStatus.Online -> Log.d(TAG, "Connection status: Online")
+                    is ConnectionStatus.Connecting -> Log.d(TAG, "Connection status: Connecting")
+                    is ConnectionStatus.Offline -> Log.d(TAG, "Connection status: Offline")
+                    is ConnectionStatus.Error -> Log.e(TAG, "Connection status: Error - ${status.message}")
+                }
+
+                // Fetch history when first connecting
+                if (status == ConnectionStatus.Online && wasOffline && !hasLoadedHistory) {
+                    fetchChatHistory()
+                }
+            }
+        }
+
+        // Observe incoming messages
+        viewModelScope.launch {
+            gatewayService.incomingMessages.collect { message ->
+                handleIncomingMessage(message)
+            }
+        }
+
+        // Observe streaming state
+        viewModelScope.launch {
+            gatewayService.streamingState.collect { state ->
+                handleStreamingState(state)
+            }
+        }
+
+        // Observe auth provider changes
+        viewModelScope.launch {
+            authProviderRepository.currentConfig.collect { config ->
+                _uiState.update { it.copy(currentAuthProvider = config) }
+            }
+        }
+
+        // Observe debug premium override
+        viewModelScope.launch {
+            combine(
+                preferences.debugPremiumActive,
+                preferences.debugPremiumOverride
+            ) { active, premiumValue ->
+                if (active) premiumValue else false
+            }.collect { hasPremium ->
+                Log.d(TAG, "Debug premium override: $hasPremium")
+                _uiState.update { it.copy(hasPremiumAccess = hasPremium) }
+            }
+        }
+
+        // Observe user identity (wallet for web3, device for web2)
+        viewModelScope.launch {
+            getUserIdentityUseCase.identityFlow.collect { identity ->
+                _userIdentity.value = identity
+                when (identity) {
+                    is UserIdentity.Authenticated -> {
+                        Log.d(TAG, "User authenticated: ${identity.userId}, isWeb3: ${identity.isWeb3}")
+                    }
+                    is UserIdentity.NotAuthenticated -> {
+                        Log.d(TAG, "User not authenticated")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleStreamingState(state: StreamingState) {
+        when (state) {
+            is StreamingState.Idle -> {
+                _uiState.update { it.copy(streamingContent = "") }
+            }
+            is StreamingState.Streaming -> {
+                _uiState.update {
+                    it.copy(
+                        streamingContent = state.partialContent,
+                        isAssistantTyping = true
+                    )
+                }
+            }
+            is StreamingState.Complete -> {
+                _uiState.update { it.copy(streamingContent = "") }
+            }
+        }
+    }
+
+    private fun fetchChatHistory() {
+        viewModelScope.launch {
+            gatewayService.fetchHistory()
+                .onSuccess { historyMessages ->
+                    mergeHistoryWithLocal(historyMessages)
+                    hasLoadedHistory = true
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to fetch history", error)
+                    hasLoadedHistory = true
+                }
+        }
+    }
+
+    private fun mergeHistoryWithLocal(historyMessages: List<ai.clawly.app.domain.repository.ChatHistoryMessage>) {
+        val currentMessages = _uiState.value.messages
+        val localIds = currentMessages.map { it.id }.toSet()
+        val newMessages = mutableListOf<ChatMessage>()
+
+        for (histMsg in historyMessages) {
+            if (histMsg.id in localIds) continue
+
+            val chatMsg = ChatMessage(
+                id = histMsg.id,
+                content = histMsg.content,
+                isUser = histMsg.isUser,
+                timestamp = histMsg.timestamp ?: System.currentTimeMillis()
+            )
+            newMessages.add(chatMsg)
+        }
+
+        if (newMessages.isNotEmpty()) {
+            val merged = newMessages + currentMessages
+            _uiState.update { it.copy(messages = merged) }
+            viewModelScope.launch {
+                chatRepository.saveMessages(merged)
+            }
+            Log.d(TAG, "Merged ${newMessages.size} messages from history")
+        }
+    }
+
+    fun connect() {
+        analytics.trackChatConnect()
+        viewModelScope.launch {
+            gatewayConnectionUseCase.connect()
+        }
+    }
+
+    fun disconnect() {
+        analytics.trackChatDisconnect()
+        viewModelScope.launch {
+            gatewayConnectionUseCase.disconnect()
+        }
+    }
+
+    fun setThinkingLevel(level: ThinkingLevel) {
+        analytics.trackChatThinkingLevelChanged(level.name.lowercase())
+        _uiState.update { it.copy(thinkingLevel = level) }
+        viewModelScope.launch {
+            preferences.setThinkingLevel(level.name.lowercase())
+        }
+    }
+
+    fun addAttachment(attachment: PendingAttachment) {
+        val current = _uiState.value.pendingAttachments.toMutableList()
+        if (current.size < 4) {
+            current.add(attachment)
+            _uiState.update { it.copy(pendingAttachments = current) }
+        }
+    }
+
+    fun removeAttachment(attachmentId: String) {
+        val current = _uiState.value.pendingAttachments.filterNot { it.id == attachmentId }
+        _uiState.update { it.copy(pendingAttachments = current) }
+    }
+
+    fun clearAttachments() {
+        _uiState.update { it.copy(pendingAttachments = emptyList()) }
+    }
+
+    /**
+     * Validate if user can send a message
+     */
+    fun validateSendMessage(): SendValidationResult {
+        val state = _uiState.value
+
+        Log.d(TAG, "Validating send: hasPremium=${state.hasPremiumAccess}, hasAuthProvider=${state.hasAuthProvider}, isProvisioning=${state.isProvisioning}, isConnected=${state.isConnected}, hostingType=${state.currentAuthProvider.hostingType}, isConfigured=${state.currentAuthProvider.isConfigured}")
+
+        // Web3 builds: Check credits and connection
+        if (BuildConfig.IS_WEB3) {
+            val credits = _web3Credits.value
+            Log.d(TAG, "Web3 validation: credits=$credits, isConnected=${state.isConnected}")
+            if (credits <= 0) {
+                Log.d(TAG, "Validation failed: no web3 credits")
+                return SendValidationResult.ShowPaywall
+            }
+            // Also need to check connection for web3
+            if (!state.isConnected) {
+                Log.d(TAG, "Validation failed: web3 not connected to gateway")
+                return SendValidationResult.ShowConfigPrompt
+            }
+            // Web3 with credits and connected - allow
+            return SendValidationResult.Allowed
+        }
+
+        // Web2 flow below
+        // Premium users
+        if (state.hasPremiumAccess) {
+            // Premium but no auth provider configured -> show config prompt
+            if (!state.hasAuthProvider) {
+                Log.d(TAG, "Validation failed: no auth provider")
+                return SendValidationResult.ShowConfigPrompt
+            }
+
+            // Still provisioning -> show config prompt (to show status)
+            if (state.isProvisioning) {
+                Log.d(TAG, "Validation failed: still provisioning")
+                return SendValidationResult.ShowConfigPrompt
+            }
+
+            // Note: For managed hosting, OpenClaw proxy is auto-activated, so no need to check AI provider
+            // The old check for aiProvider is removed since we auto-configure OpenClaw on instance ready
+
+            // Not connected to gateway -> show config prompt
+            if (!state.isConnected) {
+                Log.d(TAG, "Validation failed: not connected")
+                return SendValidationResult.ShowConfigPrompt
+            }
+
+            Log.d(TAG, "Validation passed")
+            return SendValidationResult.Allowed
+        }
+
+        // Non-premium users
+        // If not connected, show paywall immediately
+        if (!state.isConnected) {
+            return SendValidationResult.ShowPaywall
+        }
+
+        // If reached message limit, show paywall
+        if (state.userMessageCount >= freeMessageLimit) {
+            return SendValidationResult.ShowPaywall
+        }
+
+        return SendValidationResult.Allowed
+    }
+
+    /**
+     * Send a message
+     */
+    fun sendMessage(text: String) {
+        Log.d(TAG, "sendMessage called with: '$text'")
+        val trimmedText = text.trim()
+        val attachments = _uiState.value.pendingAttachments
+
+        if (trimmedText.isEmpty() && attachments.isEmpty()) {
+            Log.d(TAG, "sendMessage: empty text and no attachments, returning")
+            return
+        }
+
+        // Validate
+        val validation = validateSendMessage()
+        Log.d(TAG, "sendMessage validation result: $validation")
+        when (validation) {
+            SendValidationResult.Allowed -> {
+                // Continue to send
+            }
+            SendValidationResult.ShowPaywall -> {
+                viewModelScope.launch { _events.emit(ChatEvent.ShowPaywall) }
+                return
+            }
+            SendValidationResult.ShowConfigPrompt -> {
+                viewModelScope.launch { _events.emit(ChatEvent.ShowConfigPrompt) }
+                return
+            }
+            SendValidationResult.ShowProviderSetup -> {
+                viewModelScope.launch { _events.emit(ChatEvent.ShowProviderSetup) }
+                return
+            }
+        }
+
+        // Deduct credit for web3 builds
+        if (BuildConfig.IS_WEB3) {
+            viewModelScope.launch {
+                web3CreditsUseCase.deductCredit()
+                Log.d(TAG, "Deducted 1 credit for web3 message")
+            }
+        }
+
+        // Store for retry
+        lastUserMessage = trimmedText
+
+        // Convert pending attachments to message attachments
+        val messageAttachments = attachments.map {
+            MessageAttachment(imageData = it.data, mimeType = it.mimeType)
+        }
+
+        // Add user message locally
+        val userMessage = ChatMessage.userMessage(trimmedText, messageAttachments)
+        val updatedMessages = _uiState.value.messages + userMessage
+
+        _uiState.update {
+            it.copy(
+                messages = updatedMessages,
+                isAssistantTyping = true,
+                streamingContent = "",
+                pendingAttachments = emptyList()
+            )
+        }
+
+        // Track analytics
+        analytics.trackChatMessageSent(
+            length = trimmedText.length,
+            hasAttachments = attachments.isNotEmpty(),
+            attachmentCount = attachments.size,
+            thinkingLevel = _uiState.value.thinkingLevel.name.lowercase()
+        )
+
+        viewModelScope.launch {
+            chatRepository.saveMessages(updatedMessages)
+            _events.emit(ChatEvent.MessageSent)
+            _events.emit(ChatEvent.ScrollToBottom)
+        }
+
+        // Send via gateway
+        viewModelScope.launch {
+            val attachmentPayloads = attachments.map {
+                AttachmentPayload.fromImageData(it.data, it.fileName, it.mimeType)
+            }
+
+            val enabledSkills = skillsManager.getEnabledSkillPayloads()
+            Log.d(TAG, "Sending message with ${enabledSkills.size} skills")
+
+            gatewayService.sendMessage(
+                message = trimmedText,
+                thinkingLevel = _uiState.value.thinkingLevel,
+                skills = enabledSkills,
+                attachments = attachmentPayloads
+            ).onFailure { error ->
+                handleSendError(error)
+            }
+        }
+
+        // Start timeout
+        startResponseTimeout()
+    }
+
+    private fun startResponseTimeout() {
+        timeoutJob?.cancel()
+        val timeout = if (_uiState.value.thinkingLevel == ThinkingLevel.High) 150_000L else 120_000L
+
+        timeoutJob = viewModelScope.launch {
+            delay(timeout)
+            if (_uiState.value.isAssistantTyping) {
+                val timeoutMessage = ChatMessage.errorMessage(
+                    "Response timed out. The server might be busy.",
+                    ChatErrorType.Timeout
+                )
+                val updatedMessages = _uiState.value.messages + timeoutMessage
+
+                _uiState.update {
+                    it.copy(
+                        messages = updatedMessages,
+                        isAssistantTyping = false,
+                        streamingContent = ""
+                    )
+                }
+                chatRepository.saveMessages(updatedMessages)
+            }
+        }
+    }
+
+    private fun handleSendError(error: Throwable) {
+        timeoutJob?.cancel()
+
+        val errorMessage = ChatMessage.errorMessage(
+            "Failed to send message. Please check your connection.",
+            ChatErrorType.SendFailed
+        )
+        val updatedMessages = _uiState.value.messages + errorMessage
+
+        _uiState.update {
+            it.copy(
+                messages = updatedMessages,
+                isAssistantTyping = false,
+                streamingContent = "",
+                error = error.message,
+                showError = true
+            )
+        }
+
+        viewModelScope.launch {
+            chatRepository.saveMessages(updatedMessages)
+        }
+    }
+
+    private suspend fun handleIncomingMessage(message: GatewayMessage) {
+        timeoutJob?.cancel()
+
+        _uiState.update {
+            it.copy(isAssistantTyping = false, streamingContent = "")
+        }
+
+        val content = message.payload?.content
+        if (content.isNullOrEmpty()) {
+            Log.d(TAG, "Received non-content message: ${message.type}")
+            return
+        }
+
+        analytics.trackChatMessageReceived(type = message.type)
+
+        val assistantMessage = ChatMessage.assistantMessage(content)
+        val updatedMessages = _uiState.value.messages + assistantMessage
+
+        _uiState.update { it.copy(messages = updatedMessages) }
+        chatRepository.saveMessages(updatedMessages)
+
+        // Emit speak event for TTS
+        _events.emit(ChatEvent.SpeakText(content))
+        _events.emit(ChatEvent.ScrollToBottom)
+    }
+
+    /**
+     * Abort the current response
+     */
+    fun abortResponse() {
+        val state = _uiState.value
+        if (!state.isAssistantTyping || state.isAborting) return
+
+        analytics.trackChatAbort()
+        _uiState.update { it.copy(isAborting = true) }
+
+        viewModelScope.launch {
+            gatewayService.abortChat()
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isAborting = false,
+                            isAssistantTyping = false,
+                            streamingContent = ""
+                        )
+                    }
+                    Log.d(TAG, "Response aborted")
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isAborting = false,
+                            isAssistantTyping = false,
+                            streamingContent = ""
+                        )
+                    }
+                    Log.e(TAG, "Abort failed", error)
+                }
+
+            timeoutJob?.cancel()
+        }
+    }
+
+    /**
+     * Retry the last failed message
+     */
+    fun retryLastMessage() {
+        analytics.trackChatRetryMessage(_uiState.value.thinkingLevel.name.lowercase())
+
+        // Remove last error message if present
+        val messages = _uiState.value.messages.toMutableList()
+        if (messages.lastOrNull()?.isError == true) {
+            messages.removeAt(messages.lastIndex)
+            _uiState.update { it.copy(messages = messages) }
+        }
+
+        // Resend
+        lastUserMessage?.let { message ->
+            _uiState.update { it.copy(isAssistantTyping = true, streamingContent = "") }
+
+            viewModelScope.launch {
+                gatewayService.sendMessage(
+                    message = message,
+                    thinkingLevel = _uiState.value.thinkingLevel
+                ).onFailure { error ->
+                    handleSendError(error)
+                }
+            }
+
+            startResponseTimeout()
+        }
+    }
+
+    /**
+     * Reconnect to gateway
+     */
+    fun reconnect() {
+        analytics.trackChatReconnect()
+        viewModelScope.launch {
+            gatewayConnectionUseCase.reconnect()
+        }
+    }
+
+    /**
+     * Clear chat history
+     */
+    fun clearHistory() {
+        analytics.trackChatHistoryCleared()
+        _uiState.update { it.copy(messages = emptyList()) }
+        lastUserMessage = null
+
+        viewModelScope.launch {
+            chatRepository.clearMessages()
+        }
+    }
+
+    fun dismissError() {
+        _uiState.update { it.copy(showError = false, error = null) }
+    }
+
+    fun setPremiumAccess(hasPremium: Boolean) {
+        _uiState.update { it.copy(hasPremiumAccess = hasPremium) }
+    }
+
+    // Voice recording methods
+    fun setRecording(recording: Boolean) {
+        _uiState.update { it.copy(isRecording = recording) }
+    }
+
+    fun updateRmsLevel(rms: Float) {
+        _uiState.update { it.copy(recordingRmsLevel = rms) }
+    }
+
+    fun appendRecognitionResult(text: String) {
+        if (text.isBlank()) return
+        val current = _uiState.value.partialRecognitionText
+        val separator = if (current.isNotEmpty() && !current.endsWith(" ")) " " else ""
+        _uiState.update { it.copy(partialRecognitionText = current + separator + text) }
+    }
+
+    fun updatePartialResult(partial: String) {
+        _uiState.update { it.copy(partialRecognitionText = partial) }
+    }
+
+    fun clearPartialResult() {
+        _uiState.update { it.copy(partialRecognitionText = "") }
+    }
+
+    fun getAndClearRecognitionText(): String {
+        val text = _uiState.value.partialRecognitionText
+        _uiState.update { it.copy(partialRecognitionText = "") }
+        return text
+    }
+}
