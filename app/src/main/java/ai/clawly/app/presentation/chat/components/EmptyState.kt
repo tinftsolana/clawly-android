@@ -1,0 +1,277 @@
+package ai.clawly.app.presentation.chat.components
+
+import ai.clawly.app.R
+import ai.clawly.app.ui.theme.ClawlyColors
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+
+private data class SuggestionChip(
+    val emoji: String,
+    val shortText: String,
+    val fullMessage: String
+)
+
+private val suggestions = listOf(
+    SuggestionChip("💻", "Write code", "Help me write some code"),
+    SuggestionChip("🎙️", "Transcribe", "Transcribe my voice memo"),
+    SuggestionChip("✉️", "Emails", "Summarize my unread emails"),
+    SuggestionChip("✈️", "Travel", "Book hotels & flights"),
+    SuggestionChip("📅", "Calendar", "What's on my calendar today?"),
+    SuggestionChip("📝", "Draft", "Draft a professional email"),
+    SuggestionChip("🔍", "Research", "Help me research a topic")
+)
+
+@Composable
+fun EmptyState(
+    onSuggestionClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Staggered fade-in states
+    var showLogo by remember { mutableStateOf(false) }
+    var showGreeting by remember { mutableStateOf(false) }
+    var showSubtitle by remember { mutableStateOf(false) }
+    var showChips by remember { mutableStateOf(false) }
+    var chipsFloating by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        showLogo = true
+        delay(200)
+        showGreeting = true
+        delay(150)
+        showSubtitle = true
+        delay(200)
+        showChips = true
+        delay(100)
+        chipsFloating = true
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(60.dp))
+
+        // Clawly logo (no additional shadow - ambient glow from background is enough)
+        AnimatedVisibility(
+            visible = showLogo,
+            enter = fadeIn(animationSpec = tween(400)) +
+                    scaleIn(initialScale = 0.8f, animationSpec = tween(400))
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.clawly),
+                contentDescription = "Clawly",
+                modifier = Modifier.size(80.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Greeting
+        AnimatedVisibility(
+            visible = showGreeting,
+            enter = fadeIn(animationSpec = tween(350)) +
+                    slideInVertically(
+                        initialOffsetY = { 20 },
+                        animationSpec = tween(350)
+                    )
+        ) {
+            Text(
+                text = "Hey! I'm Clawly.",
+                color = ClawlyColors.textPrimary,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Subtitle
+        AnimatedVisibility(
+            visible = showSubtitle,
+            enter = fadeIn(animationSpec = tween(300)) +
+                    slideInVertically(
+                        initialOffsetY = { 15 },
+                        animationSpec = tween(300)
+                    )
+        ) {
+            Text(
+                text = "Ask me anything or try:",
+                color = ClawlyColors.secondaryText,
+                fontSize = 15.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Floating suggestion chips - matching iOS layout
+        AnimatedVisibility(
+            visible = showChips,
+            enter = fadeIn(animationSpec = tween(400))
+        ) {
+            FloatingSuggestionChips(
+                chipsFloating = chipsFloating,
+                onSuggestionClick = onSuggestionClick
+            )
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun FloatingSuggestionChips(
+    chipsFloating: Boolean,
+    onSuggestionClick: (String) -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.padding(horizontal = 24.dp)
+    ) {
+        // Row 1: Code, Transcribe
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FloatingChip(
+                emoji = "💻",
+                text = "Write code",
+                delay = 0.0,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("Help me write some code") }
+            )
+            FloatingChip(
+                emoji = "🎙️",
+                text = "Transcribe",
+                delay = 0.3,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("Transcribe my voice memo") }
+            )
+        }
+
+        // Row 2: Emails, Travel, Calendar
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FloatingChip(
+                emoji = "✉️",
+                text = "Emails",
+                delay = 0.5,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("Summarize my unread emails") }
+            )
+            FloatingChip(
+                emoji = "✈️",
+                text = "Travel",
+                delay = 0.2,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("Book hotels & flights") }
+            )
+            FloatingChip(
+                emoji = "📅",
+                text = "Calendar",
+                delay = 0.7,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("What's on my calendar today?") }
+            )
+        }
+
+        // Row 3: Draft, Research
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FloatingChip(
+                emoji = "📝",
+                text = "Draft",
+                delay = 0.4,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("Draft a professional email") }
+            )
+            FloatingChip(
+                emoji = "🔍",
+                text = "Research",
+                delay = 0.6,
+                isFloating = chipsFloating,
+                onClick = { onSuggestionClick("Help me research a topic") }
+            )
+        }
+    }
+}
+
+@Composable
+private fun FloatingChip(
+    emoji: String,
+    text: String,
+    delay: Double,
+    isFloating: Boolean,
+    onClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+
+    // Floating animation
+    val infiniteTransition = rememberInfiniteTransition(label = "float_$text")
+    val offset by infiniteTransition.animateFloat(
+        initialValue = 4f,
+        targetValue = -4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = 1800,
+                easing = EaseInOut,
+                delayMillis = (delay * 1000).toInt()
+            ),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "offset_$text"
+    )
+
+    Row(
+        modifier = Modifier
+            .graphicsLayer {
+                translationY = if (isFloating) offset else 0f
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .background(ClawlyColors.surfaceElevated)
+            .clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = emoji,
+            fontSize = 16.sp
+        )
+        Text(
+            text = text,
+            color = ClawlyColors.textPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}

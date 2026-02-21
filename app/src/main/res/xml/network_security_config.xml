@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext for control plane server (debug only) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">157.245.185.252</domain>
+    </domain-config>
+    <!-- Allow cleartext for gateway server (fallback for ws://) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">167.172.219.64</domain>
+    </domain-config>
+    <!-- Trust user-installed CAs for debug builds -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+            <certificates src="system" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

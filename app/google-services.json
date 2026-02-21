@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "187834608967",
+    "project_id": "crawly-f8cb3",
+    "storage_bucket": "crawly-f8cb3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:187834608967:android:32659c8b45a4d82db2f062",
+        "android_client_info": {
+          "package_name": "ai.clawly.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBsLQGScToHGg4y4GkDN1s9iJ9i01ECCKA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
