@@ -42,6 +42,7 @@ fun ChatScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToPaywall: () -> Unit,
     onNavigateToProviderSetup: () -> Unit,
+    onNavigateToLogin: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -232,6 +233,7 @@ fun ChatScreen(
         viewModel.events.collectLatest { event ->
             when (event) {
                 is ChatEvent.ShowPaywall -> onNavigateToPaywall()
+                is ChatEvent.ShowLogin -> onNavigateToLogin()
                 is ChatEvent.ShowConfigPrompt -> {
                     android.widget.Toast.makeText(context, "Config needed - check settings", android.widget.Toast.LENGTH_SHORT).show()
                     onNavigateToSettings()
@@ -306,7 +308,9 @@ fun ChatScreen(
 
         // Content layer - fills entire screen, scrolls under bars
         Box(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
         ) {
             if (uiState.messages.isEmpty() && !uiState.isAssistantTyping) {
                 EmptyState(
@@ -320,15 +324,6 @@ fun ChatScreen(
                         .padding(top = topBarHeight)
                 )
             } else {
-                val imeHeightDp = with(density) { imeHeight.toDp() }
-                val targetBottomPadding = bottomBarHeight + 16.dp +
-                    if (imeHeightDp > 0.dp) imeHeightDp else 0.dp
-                val animatedBottomPadding by animateDpAsState(
-                    targetValue = targetBottomPadding,
-                    animationSpec = tween(durationMillis = 250),
-                    label = "bottomPadding"
-                )
-
                 MessageList(
                     messages = uiState.messages,
                     isAssistantTyping = uiState.isAssistantTyping,
@@ -338,7 +333,7 @@ fun ChatScreen(
                     listState = listState,
                     contentPadding = PaddingValues(
                         top = topBarHeight + 48.dp,
-                        bottom = animatedBottomPadding
+                        bottom = bottomBarHeight + 16.dp
                     ),
                     modifier = Modifier.fillMaxSize()
                 )

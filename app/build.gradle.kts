@@ -176,6 +176,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-config-ktx")
     implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.firebase:firebase-auth-ktx")
 
     implementation("androidx.media3:media3-transformer:1.2.0")
 

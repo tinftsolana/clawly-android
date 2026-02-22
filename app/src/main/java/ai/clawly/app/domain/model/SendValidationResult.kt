@@ -10,6 +10,9 @@ sealed class SendValidationResult {
     /** Non-premium user hit limit or no connection - show paywall */
     data object ShowPaywall : SendValidationResult()
 
+    /** Web2 user not signed in - show login */
+    data object ShowLogin : SendValidationResult()
+
     /** Premium user but no connection configured - show config prompt */
     data object ShowConfigPrompt : SendValidationResult()
 

@@ -1,6 +1,7 @@
 package ai.clawly.app.data.remote
 
 import ai.clawly.app.BuildConfig
+import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.domain.model.ManagedInstanceInfo
 import ai.clawly.app.domain.model.ManagedInstanceStatus
@@ -85,7 +86,8 @@ data class ProviderAuthResponse(
  */
 @Singleton
 class ControlPlaneService @Inject constructor(
-    private val preferences: GatewayPreferences
+    private val preferences: GatewayPreferences,
+    private val firebaseAuthService: FirebaseAuthService
 ) {
     companion object {
         const val BASE_URL = "http://157.245.185.252:3003"
@@ -101,7 +103,12 @@ class ControlPlaneService @Inject constructor(
             json(json)
         }
         install(Logging) {
-            level = LogLevel.BODY
+            logger = object : Logger {
+                override fun log(message: String) {
+                    Log.d(TAG, message)
+                }
+            }
+            level = LogLevel.ALL
         }
         install(DefaultRequest) {
             header("X-Platform", if (BuildConfig.IS_WEB3) "web3" else "web2")
@@ -121,6 +128,66 @@ class ControlPlaneService @Inject constructor(
         }
     }
 
+    /**
+     * Add auth headers: Firebase Bearer token for web2 signed-in users, X-User-Id fallback otherwise
+     */
+    private suspend fun HttpRequestBuilder.addAuthHeaders(userId: String) {
+        if (BuildConfig.IS_WEB2 && firebaseAuthService.isSignedIn) {
+            firebaseAuthService.getIdToken(forceRefresh = false).onSuccess { token ->
+                Log.d(TAG, "AUTH: Using Bearer token (Firebase signed in)")
+                header("Authorization", "Bearer $token")
+                return
+            }.onFailure { e ->
+                Log.e(TAG, "AUTH: Firebase signed in but getIdToken FAILED, falling back to X-User-Id", e)
+            }
+        } else {
+            Log.d(TAG, "AUTH: Firebase not signed in (isWeb2=${BuildConfig.IS_WEB2}, isSignedIn=${firebaseAuthService.isSignedIn})")
+        }
+        Log.d(TAG, "AUTH: Using X-User-Id=$userId")
+        header("X-User-Id", userId)
+    }
+
+    // MARK: - Auth
+
+    /**
+     * Login with Firebase token, optionally linking a guest device ID.
+     * POST /auth/login with Bearer token + optional X-User-Id for guest linking.
+     * Returns the backend userId from the response.
+     */
+    suspend fun login(firebaseToken: String, guestUserId: String?): Result<String?> {
+        return try {
+            Log.d(TAG, "Calling POST /auth/login (guestUserId=${guestUserId != null})")
+
+            val response = client.post("$BASE_URL/auth/login") {
+                header("Authorization", "Bearer $firebaseToken")
+                if (!guestUserId.isNullOrEmpty()) {
+                    header("X-User-Id", guestUserId)
+                }
+            }
+
+            if (response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                Log.d(TAG, "Login successful, response: $body")
+                // Try to extract userId from response
+                val backendUserId = try {
+                    json.decodeFromString<UserResponse>(body).userId
+                } catch (e: Exception) {
+                    Log.d(TAG, "Login response has no userId field")
+                    null
+                }
+                Log.d(TAG, "Backend userId: $backendUserId")
+                Result.success(backendUserId)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Login failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Login error", e)
+            Result.failure(e)
+        }
+    }
+
     // MARK: - Instance Management (matching iOS)
 
     /**
@@ -133,7 +200,7 @@ class ControlPlaneService @Inject constructor(
 
             val response = client.post("$BASE_URL/instances") {
                 contentType(ContentType.Application.Json)
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
                 addBypassTokenIfNeeded()
                 setBody("{}")
             }
@@ -167,7 +234,7 @@ class ControlPlaneService @Inject constructor(
             Log.d(TAG, "Getting instance: $tenantId for userId: $userId")
 
             val response = client.get("$BASE_URL/instances/$tenantId") {
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
                 addBypassTokenIfNeeded()
             }
 
@@ -194,7 +261,7 @@ class ControlPlaneService @Inject constructor(
             Log.d(TAG, "Getting tenants for userId: $userId")
 
             val response = client.get("$BASE_URL/users/$userId/tenants") {
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
             }
 
             if (response.status.isSuccess()) {
@@ -222,7 +289,7 @@ class ControlPlaneService @Inject constructor(
 
             val response = client.post("$BASE_URL/instances/$tenantId/refresh") {
                 contentType(ContentType.Application.Json)
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
                 addBypassTokenIfNeeded()
                 setBody("{}")
             }
@@ -250,7 +317,7 @@ class ControlPlaneService @Inject constructor(
             Log.d(TAG, "Deleting instance: $tenantId")
 
             val response = client.delete("$BASE_URL/instances/$tenantId") {
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
                 addBypassTokenIfNeeded()
             }
 
@@ -467,6 +534,39 @@ class ControlPlaneService @Inject constructor(
     // MARK: - User & Credits
 
     /**
+     * Get current user info using Bearer token only (no userId needed).
+     * Returns the backend's user object including the actual userId.
+     */
+    suspend fun getMe(): Result<UserResponse> {
+        return try {
+            Log.d(TAG, "Getting /me (Bearer token only)")
+
+            val token = firebaseAuthService.getIdToken(forceRefresh = false).getOrNull()
+            if (token == null) {
+                Log.e(TAG, "getMe failed: not signed in")
+                return Result.failure(Exception("Not signed in"))
+            }
+
+            val response = client.get("$BASE_URL/me") {
+                header("Authorization", "Bearer $token")
+            }
+
+            if (response.status.isSuccess()) {
+                val userResponse = response.body<UserResponse>()
+                Log.d(TAG, "getMe success: userId=${userResponse.userId}, credits=${userResponse.credits}")
+                Result.success(userResponse)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "getMe failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getMe error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get user info including credits balance
      */
     suspend fun getUser(userId: String): Result<UserResponse> {
@@ -474,7 +574,7 @@ class ControlPlaneService @Inject constructor(
             Log.d(TAG, "Getting user: $userId")
 
             val response = client.get("$BASE_URL/users/$userId") {
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
             }
 
             if (response.status.isSuccess()) {
@@ -501,7 +601,7 @@ class ControlPlaneService @Inject constructor(
 
             val response = client.post("$BASE_URL/me/sync-purchases") {
                 contentType(ContentType.Application.Json)
-                header("X-User-Id", userId)
+                addAuthHeaders(userId)
                 setBody("{}")
             }
 

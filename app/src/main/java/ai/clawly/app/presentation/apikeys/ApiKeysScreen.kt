@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,55 +23,28 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-data class ApiKeyItem(
-    val id: String,
-    val name: String,
-    val description: String,
-    val value: String,
-    val isSet: Boolean
-)
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApiKeysScreen(
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    viewModel: ApiKeysViewModel = hiltViewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
     var showAddKeySheet by remember { mutableStateOf(false) }
-    var keyToEdit by remember { mutableStateOf<ApiKeyItem?>(null) }
+    var keyToDelete by remember { mutableStateOf<ConfiguredApiKey?>(null) }
 
-    // Mock API keys for demonstration
-    val apiKeys = remember {
-        mutableStateListOf(
-            ApiKeyItem(
-                id = "openai",
-                name = "OpenAI API Key",
-                description = "For ChatGPT and DALL-E",
-                value = "",
-                isSet = false
-            ),
-            ApiKeyItem(
-                id = "anthropic",
-                name = "Anthropic API Key",
-                description = "For Claude models",
-                value = "",
-                isSet = false
-            ),
-            ApiKeyItem(
-                id = "google",
-                name = "Google AI API Key",
-                description = "For Gemini models",
-                value = "",
-                isSet = false
-            ),
-            ApiKeyItem(
-                id = "serpapi",
-                name = "SerpAPI Key",
-                description = "For web search functionality",
-                value = "",
-                isSet = false
-            )
-        )
+    LaunchedEffect(Unit) {
+        viewModel.fetchConfig()
+    }
+
+    // Clear messages after showing
+    LaunchedEffect(uiState.successMessage, uiState.error) {
+        if (uiState.successMessage != null || uiState.error != null) {
+            kotlinx.coroutines.delay(3000)
+            viewModel.clearMessages()
+        }
     }
 
     Scaffold(
@@ -108,296 +82,280 @@ fun ApiKeysScreen(
         },
         containerColor = ClawlyColors.background
     ) { padding ->
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = uiState.isLoading,
+            onRefresh = { viewModel.fetchConfig() },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(padding)
         ) {
-            // Info banner
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(ClawlyColors.accentPrimary.copy(alpha = 0.1f))
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = ClawlyColors.accentPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Secure Storage",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = ClawlyColors.textPrimary
+            LazyColumn(
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Info banner
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ClawlyColors.accentPrimary.copy(alpha = 0.1f))
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = ClawlyColors.accentPrimary,
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "API keys are encrypted and stored securely on your device. They are sent directly to the respective services when needed.",
-                            fontSize = 12.sp,
-                            color = ClawlyColors.secondaryText
-                        )
-                    }
-                }
-            }
-
-            // API key cards
-            items(apiKeys, key = { it.id }) { apiKey ->
-                ApiKeyCard(
-                    apiKey = apiKey,
-                    onEdit = { keyToEdit = apiKey },
-                    onDelete = {
-                        val index = apiKeys.indexOfFirst { it.id == apiKey.id }
-                        if (index != -1) {
-                            apiKeys[index] = apiKeys[index].copy(value = "", isSet = false)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Skill API Keys",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ClawlyColors.textPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Configure API keys for skills that require external services. Keys are stored securely on your gateway server.",
+                                fontSize = 12.sp,
+                                color = ClawlyColors.secondaryText
+                            )
                         }
                     }
-                )
-            }
-        }
-    }
+                }
 
-    // Edit key sheet
-    keyToEdit?.let { key ->
-        ApiKeyEditSheet(
-            apiKey = key,
-            onDismiss = { keyToEdit = null },
-            onSave = { newValue ->
-                val index = apiKeys.indexOfFirst { it.id == key.id }
-                if (index != -1) {
-                    apiKeys[index] = apiKeys[index].copy(
-                        value = newValue,
-                        isSet = newValue.isNotBlank()
+                // Success message
+                uiState.successMessage?.let { message ->
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(ClawlyColors.terminalGreen.copy(alpha = 0.15f))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = ClawlyColors.terminalGreen,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = message,
+                                fontSize = 14.sp,
+                                color = ClawlyColors.terminalGreen
+                            )
+                        }
+                    }
+                }
+
+                // Error message
+                uiState.error?.let { error ->
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(ClawlyColors.error.copy(alpha = 0.15f))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = ClawlyColors.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = error,
+                                fontSize = 14.sp,
+                                color = ClawlyColors.error,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { viewModel.fetchConfig() }) {
+                                Text("Retry", color = ClawlyColors.accentPrimary)
+                            }
+                        }
+                    }
+                }
+
+                // Empty state
+                if (!uiState.isLoading && uiState.configuredKeys.isEmpty() && uiState.error == null) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = ClawlyColors.textMuted,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "No API Keys Configured",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = ClawlyColors.textPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Add API keys for skills that need them",
+                                fontSize = 14.sp,
+                                color = ClawlyColors.secondaryText
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { showAddKeySheet = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ClawlyColors.accentPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Add API Key")
+                            }
+                        }
+                    }
+                }
+
+                // Configured keys
+                items(uiState.configuredKeys, key = { "${it.skillKey}-${it.envName}" }) { key ->
+                    ConfiguredKeyCard(
+                        apiKey = key,
+                        onDelete = { keyToDelete = key }
                     )
                 }
-                keyToEdit = null
             }
-        )
+        }
     }
 
     // Add key sheet
     if (showAddKeySheet) {
         AddApiKeySheet(
+            isSaving = uiState.isSaving,
             onDismiss = { showAddKeySheet = false },
-            onAdd = { name, value ->
-                apiKeys.add(
-                    ApiKeyItem(
-                        id = name.lowercase().replace(" ", "_"),
-                        name = name,
-                        description = "Custom API key",
-                        value = value,
-                        isSet = value.isNotBlank()
-                    )
-                )
+            onSave = { skillKey, envName, value ->
+                viewModel.saveApiKey(skillKey, envName, value)
                 showAddKeySheet = false
             }
+        )
+    }
+
+    // Delete confirmation
+    keyToDelete?.let { key ->
+        AlertDialog(
+            onDismissRequest = { keyToDelete = null },
+            title = { Text("Delete API Key") },
+            text = {
+                Text("Are you sure you want to delete the API key for ${key.displayName}?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteApiKey(key.skillKey, key.envName)
+                        keyToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = ClawlyColors.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { keyToDelete = null }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = ClawlyColors.surface
         )
     }
 }
 
 @Composable
-private fun ApiKeyCard(
-    apiKey: ApiKeyItem,
-    onEdit: () -> Unit,
+private fun ConfiguredKeyCard(
+    apiKey: ConfiguredApiKey,
     onDelete: () -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(ClawlyColors.surface)
             .border(
                 width = 1.dp,
-                color = if (apiKey.isSet) ClawlyColors.accentPrimary.copy(alpha = 0.3f)
-                else ClawlyColors.surfaceBorder,
+                color = ClawlyColors.accentPrimary.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(12.dp)
             )
-            .clickable { onEdit() }
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically
+        // Icon
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(ClawlyColors.accentPrimary.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
         ) {
-            // Icon
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (apiKey.isSet) ClawlyColors.accentPrimary.copy(alpha = 0.15f)
-                        else ClawlyColors.surfaceBorder.copy(alpha = 0.3f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = null,
-                    tint = if (apiKey.isSet) ClawlyColors.accentPrimary else ClawlyColors.textMuted,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            // Info
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = apiKey.name,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = ClawlyColors.textPrimary
-                    )
-
-                    if (apiKey.isSet) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Configured",
-                            tint = ClawlyColors.accentPrimary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Text(
-                    text = apiKey.description,
-                    fontSize = 13.sp,
-                    color = ClawlyColors.secondaryText
-                )
-
-                if (apiKey.isSet) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${apiKey.value.takeLast(4)}",
-                        fontSize = 12.sp,
-                        color = ClawlyColors.textMuted
-                    )
-                }
-            }
-
-            // Actions
-            if (apiKey.isSet) {
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = ClawlyColors.error,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
             Icon(
-                imageVector = Icons.Default.KeyboardArrowRight,
+                imageVector = Icons.Default.Lock,
                 contentDescription = null,
-                tint = ClawlyColors.textMuted,
+                tint = ClawlyColors.accentPrimary,
                 modifier = Modifier.size(20.dp)
             )
         }
-    }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ApiKeyEditSheet(
-    apiKey: ApiKeyItem,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit
-) {
-    var value by remember { mutableStateOf(apiKey.value) }
-    var showValue by remember { mutableStateOf(false) }
+        Spacer(modifier = Modifier.width(14.dp))
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = ClawlyColors.background
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp)
-        ) {
-            Text(
-                text = apiKey.name,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = ClawlyColors.textPrimary
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = apiKey.description,
-                fontSize = 14.sp,
-                color = ClawlyColors.secondaryText
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                label = { Text("API Key") },
-                placeholder = { Text("sk-...") },
-                modifier = Modifier.fillMaxWidth(),
-                visualTransformation = if (showValue) VisualTransformation.None
-                else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { showValue = !showValue }) {
-                        Icon(
-                            imageVector = if (showValue) Icons.Default.Close
-                            else Icons.Default.Search,
-                            contentDescription = if (showValue) "Hide" else "Show",
-                            tint = ClawlyColors.secondaryText
-                        )
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ClawlyColors.accentPrimary,
-                    unfocusedBorderColor = ClawlyColors.surfaceBorder,
-                    focusedTextColor = ClawlyColors.textPrimary,
-                    unfocusedTextColor = ClawlyColors.textPrimary,
-                    focusedLabelColor = ClawlyColors.accentPrimary,
-                    unfocusedLabelColor = ClawlyColors.secondaryText,
-                    cursorColor = ClawlyColors.accentPrimary
-                ),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = { onSave(value) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = ClawlyColors.accentPrimary
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
+        // Info
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Save",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold
+                    text = apiKey.displayName,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = ClawlyColors.textPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Configured",
+                    tint = ClawlyColors.terminalGreen,
+                    modifier = Modifier.size(14.dp)
                 )
             }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "${apiKey.skillKey} / ${apiKey.envName}",
+                fontSize = 12.sp,
+                color = ClawlyColors.textMuted
+            )
+        }
 
-            Spacer(modifier = Modifier.height(32.dp))
+        // Delete button
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete",
+                tint = ClawlyColors.error,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
@@ -405,14 +363,16 @@ private fun ApiKeyEditSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddApiKeySheet(
+    isSaving: Boolean,
     onDismiss: () -> Unit,
-    onAdd: (name: String, value: String) -> Unit
+    onSave: (skillKey: String, envName: String, value: String) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
+    var skillKey by remember { mutableStateOf("") }
+    var envName by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var showValue by remember { mutableStateOf(false) }
 
-    val canAdd = name.isNotBlank() && value.isNotBlank()
+    val canSave = skillKey.isNotBlank() && envName.isNotBlank() && value.isNotBlank()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -424,19 +384,28 @@ private fun AddApiKeySheet(
                 .padding(24.dp)
         ) {
             Text(
-                text = "Add Custom API Key",
+                text = "Add API Key",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = ClawlyColors.textPrimary
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Configure an API key for a specific skill",
+                fontSize = 14.sp,
+                color = ClawlyColors.secondaryText
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
 
+            // Skill Key
             OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Name") },
-                placeholder = { Text("e.g. My Service") },
+                value = skillKey,
+                onValueChange = { skillKey = it },
+                label = { Text("Skill Key") },
+                placeholder = { Text("e.g. brave-search, weather") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = ClawlyColors.accentPrimary,
@@ -453,11 +422,34 @@ private fun AddApiKeySheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Env Name
+            OutlinedTextField(
+                value = envName,
+                onValueChange = { envName = it },
+                label = { Text("Environment Variable") },
+                placeholder = { Text("e.g. BRAVE_API_KEY") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ClawlyColors.accentPrimary,
+                    unfocusedBorderColor = ClawlyColors.surfaceBorder,
+                    focusedTextColor = ClawlyColors.textPrimary,
+                    unfocusedTextColor = ClawlyColors.textPrimary,
+                    focusedLabelColor = ClawlyColors.accentPrimary,
+                    unfocusedLabelColor = ClawlyColors.secondaryText,
+                    cursorColor = ClawlyColors.accentPrimary
+                ),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // API Key Value
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
                 label = { Text("API Key") },
-                placeholder = { Text("Enter API key...") },
+                placeholder = { Text("Enter your API key...") },
                 modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (showValue) VisualTransformation.None
                 else PasswordVisualTransformation(),
@@ -487,8 +479,8 @@ private fun AddApiKeySheet(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = { onAdd(name, value) },
-                enabled = canAdd,
+                onClick = { onSave(skillKey.trim(), envName.trim(), value) },
+                enabled = canSave && !isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -498,8 +490,16 @@ private fun AddApiKeySheet(
                 ),
                 shape = RoundedCornerShape(12.dp)
             ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 Text(
-                    text = "Add API Key",
+                    text = if (isSaving) "Saving..." else "Save API Key",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold
                 )

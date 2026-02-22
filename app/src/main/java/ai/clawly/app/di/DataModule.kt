@@ -1,5 +1,6 @@
 package ai.clawly.app.di
 
+import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.local.ChatPersistenceService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
@@ -41,9 +42,10 @@ object DataModule {
     @Provides
     @Singleton
     fun provideControlPlaneService(
-        preferences: GatewayPreferences
+        preferences: GatewayPreferences,
+        firebaseAuthService: FirebaseAuthService
     ): ControlPlaneService {
-        return ControlPlaneService(preferences)
+        return ControlPlaneService(preferences, firebaseAuthService)
     }
 
     @Provides
@@ -53,8 +55,9 @@ object DataModule {
         controlPlaneService: ControlPlaneService,
         gatewayService: GatewayService,
         deviceIdentityManager: DeviceIdentityManager,
-        walletRepository: WalletRepository
+        walletRepository: WalletRepository,
+        firebaseAuthService: FirebaseAuthService
     ): AuthProviderRepository {
-        return AuthProviderRepositoryImpl(preferences, controlPlaneService, gatewayService, deviceIdentityManager, walletRepository)
+        return AuthProviderRepositoryImpl(preferences, controlPlaneService, gatewayService, deviceIdentityManager, walletRepository, firebaseAuthService)
     }
 }

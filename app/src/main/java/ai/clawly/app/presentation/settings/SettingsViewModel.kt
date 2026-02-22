@@ -2,6 +2,8 @@ package ai.clawly.app.presentation.settings
 
 import ai.clawly.app.BuildConfig
 import ai.clawly.app.analytics.AmplitudeAnalyticsService
+import ai.clawly.app.data.auth.FirebaseAuthService
+import ai.clawly.app.data.auth.FirebaseAuthState
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
@@ -10,9 +12,11 @@ import ai.clawly.app.domain.model.AuthProviderConfig
 import ai.clawly.app.domain.model.ConnectionStatus
 import ai.clawly.app.domain.model.HostingType
 import ai.clawly.app.domain.repository.AuthProviderRepository
+import ai.clawly.app.domain.repository.ChatRepository
 import ai.clawly.app.domain.repository.WalletRepository
 import ai.clawly.app.domain.usecase.GatewayConnectionUseCase
 import ai.clawly.app.domain.usecase.Web3CreditsUseCase
+import com.revenuecat.purchases.Purchases
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,7 +52,12 @@ data class SettingsUiState(
     val useDebugUserId: Boolean = false,
     val useBypassToken: Boolean = false,
     val bypassToken: String = "",
-    val userId: String = ""
+    val userId: String = "",
+    // Firebase account info (web2)
+    val firebaseUserName: String? = null,
+    val firebaseUserEmail: String? = null,
+    val firebaseUserPhotoUrl: String? = null,
+    val isFirebaseSignedIn: Boolean = false
 ) {
     /** Format credits for display (e.g., 1,000,000 → "1.0M") */
     val creditsFormatted: String
@@ -96,7 +105,9 @@ class SettingsViewModel @Inject constructor(
     private val walletRepository: WalletRepository,
     private val web3CreditsUseCase: Web3CreditsUseCase,
     private val gatewayConnectionUseCase: GatewayConnectionUseCase,
-    private val analytics: AmplitudeAnalyticsService
+    private val chatRepository: ChatRepository,
+    private val analytics: AmplitudeAnalyticsService,
+    private val firebaseAuthService: FirebaseAuthService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -105,7 +116,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * Get current user ID
      * - Web3 builds: Uses wallet address (publicKey)
-     * - Web2 builds: Uses device identity
+     * - Web2 builds: Uses Firebase UID when signed in, device identity fallback
      */
     private val currentUserId: String
         get() {
@@ -123,7 +134,19 @@ class SettingsViewModel @Inject constructor(
                 android.util.Log.w("SettingsViewModel", "Web3 build but wallet not connected, falling back to device identity")
             }
 
-            // Web2 builds (or web3 fallback): Use device identity
+            // Web2 builds: Prefer backend userId (from POST /auth/login), then Firebase UID
+            if (BuildConfig.IS_WEB2) {
+                val backendUserId = runBlocking { preferences.getBackendUserIdSync() }
+                if (!backendUserId.isNullOrEmpty()) {
+                    return backendUserId
+                }
+                val firebaseUid = firebaseAuthService.firebaseUid
+                if (firebaseUid != null) {
+                    return firebaseUid
+                }
+            }
+
+            // Fallback: Use device identity
             val identity = runBlocking { deviceIdentityManager.loadOrCreateIdentity() }
             return identity?.deviceId ?: "android-${System.currentTimeMillis()}"
         }
@@ -133,6 +156,7 @@ class SettingsViewModel @Inject constructor(
         loadUserId()
         observeAuthConfig()
         observeConnectionStatus()
+        observeFirebaseAuth()
     }
 
     private fun loadUserId() {
@@ -232,12 +256,60 @@ class SettingsViewModel @Inject constructor(
      */
     fun refreshAuthConfig() {
         val currentConfig = authProviderRepository.currentConfig.value
-        android.util.Log.d("SettingsViewModel", "Refreshing config: hostingType=${currentConfig.hostingType}, isConfigured=${currentConfig.isConfigured}")
+        android.util.Log.d("SettingsViewModel", "refreshAuthConfig: hostingType=${currentConfig.hostingType}, isConfigured=${currentConfig.isConfigured}, isProvisioning=${currentConfig.isProvisioning}, managedInstance=${currentConfig.managedInstance?.tenantId}, firebaseSignedIn=${firebaseAuthService.isSignedIn}, currentUserId=$currentUserId")
         _uiState.update {
             it.copy(currentAuthConfig = currentConfig)
         }
         if (currentConfig.hostingType == HostingType.Managed && currentConfig.isConfigured) {
             fetchCredits()
+        }
+
+        // If signed in but no local config, check backend for existing tenants
+        if (BuildConfig.IS_WEB2 && firebaseAuthService.isSignedIn && !currentConfig.isConfigured && !currentConfig.isProvisioning) {
+            checkForExistingTenants()
+        }
+    }
+
+    /**
+     * Check if user has existing tenants on the backend (from iOS or another device)
+     */
+    private fun checkForExistingTenants() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true) }
+
+            // First call /me to get the correct backend userId
+            android.util.Log.d("SettingsViewModel", "Calling getMe() to get backend userId")
+            controlPlaneService.getMe().fold(
+                onSuccess = { userResponse ->
+                    val backendUserId = userResponse.userId
+                    android.util.Log.d("SettingsViewModel", "Got backend userId: $backendUserId")
+                    preferences.setBackendUserId(backendUserId)
+
+                    // Now fetch tenants with the correct userId
+                    android.util.Log.d("SettingsViewModel", "Checking for existing tenants for userId=$backendUserId")
+                    controlPlaneService.getUserTenants(backendUserId).fold(
+                        onSuccess = { tenants ->
+                            android.util.Log.d("SettingsViewModel", "Found ${tenants.size} existing tenants")
+                            if (tenants.isNotEmpty()) {
+                                val existingTenant = tenants.first()
+                                android.util.Log.d("SettingsViewModel", "Using existing tenant: ${existingTenant.tenantId}, status=${existingTenant.status}")
+                                // Configure local state with existing tenant
+                                authProviderRepository.configureManaged(existingTenant.tenantId)
+                                authProviderRepository.updateManagedInstance(existingTenant)
+                            }
+                            _uiState.update { it.copy(isSyncing = false) }
+                        },
+                        onFailure = { e ->
+                            android.util.Log.e("SettingsViewModel", "Failed to check for existing tenants", e)
+                            _uiState.update { it.copy(isSyncing = false) }
+                        }
+                    )
+                },
+                onFailure = { e ->
+                    android.util.Log.e("SettingsViewModel", "getMe() failed, cannot check tenants", e)
+                    _uiState.update { it.copy(isSyncing = false) }
+                }
+            )
         }
     }
 
@@ -338,6 +410,7 @@ class SettingsViewModel @Inject constructor(
     fun logout() {
         viewModelScope.launch {
             authProviderRepository.clearConfig()
+            chatRepository.clearMessages()
         }
     }
 
@@ -410,6 +483,64 @@ class SettingsViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(showError = false, error = null) }
+    }
+
+    // MARK: - Firebase Auth
+
+    private fun observeFirebaseAuth() {
+        viewModelScope.launch {
+            firebaseAuthService.authState.collect { state ->
+                when (state) {
+                    is FirebaseAuthState.Authenticated -> {
+                        _uiState.update {
+                            it.copy(
+                                isFirebaseSignedIn = true,
+                                firebaseUserName = state.displayName,
+                                firebaseUserEmail = state.email,
+                                firebaseUserPhotoUrl = state.photoUrl
+                            )
+                        }
+                    }
+                    else -> {
+                        _uiState.update {
+                            it.copy(
+                                isFirebaseSignedIn = false,
+                                firebaseUserName = null,
+                                firebaseUserEmail = null,
+                                firebaseUserPhotoUrl = null
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun signOutFirebase() {
+        viewModelScope.launch {
+            // Disconnect gateway first
+            android.util.Log.d("SettingsViewModel", "Signing out: disconnecting gateway")
+            gatewayConnectionUseCase.disconnect()
+
+            // Clear hosting config
+            android.util.Log.d("SettingsViewModel", "Signing out: clearing auth config")
+            authProviderRepository.clearConfig()
+
+            // Clear chat messages
+            android.util.Log.d("SettingsViewModel", "Signing out: clearing chat messages")
+            chatRepository.clearMessages()
+
+            // Clear backend userId
+            preferences.clearBackendUserId()
+        }
+
+        // Sign out of Firebase
+        firebaseAuthService.signOut()
+
+        // Sign out of RevenueCat
+        try {
+            Purchases.sharedInstance.logOut(null)
+        } catch (_: Exception) { }
     }
 
     // MARK: - AI Provider API Key Setup (for managed hosting)

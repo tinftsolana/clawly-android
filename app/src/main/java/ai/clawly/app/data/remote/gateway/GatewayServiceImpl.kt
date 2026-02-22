@@ -322,18 +322,6 @@ class GatewayServiceImpl @Inject constructor(
             put("deliver", false)
             put("idempotencyKey", UUID.randomUUID().toString())
 
-            if (skills.isNotEmpty()) {
-                putJsonArray("skills") {
-                    skills.forEach { skill ->
-                        addJsonObject {
-                            put("id", skill.id)
-                            put("name", skill.name)
-                            put("content", skill.content)
-                        }
-                    }
-                }
-            }
-
             if (attachments.isNotEmpty()) {
                 putJsonArray("attachments") {
                     attachments.forEach { attachment ->
@@ -368,21 +356,28 @@ class GatewayServiceImpl @Inject constructor(
 
         return try {
             val response = request("chat.history", params)
-            val messages = response?.get("messages")?.jsonArray?.mapNotNull { msg ->
+            Log.d(TAG, "chat.history response: $response")
+            val messagesArray = response?.get("messages")?.jsonArray
+            Log.d(TAG, "chat.history messages array size: ${messagesArray?.size ?: 0}")
+
+            val messages = messagesArray?.mapIndexedNotNull { index, msg ->
                 val obj = msg.jsonObject
-                val id = obj["id"]?.jsonPrimitive?.contentOrNull
-                    ?: obj["_id"]?.jsonPrimitive?.contentOrNull
-                    ?: return@mapNotNull null
-                val role = obj["role"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val content = extractMessageText(obj) ?: ""
                 val timestamp = obj["timestamp"]?.jsonPrimitive?.longOrNull
                     ?: obj["createdAt"]?.jsonPrimitive?.longOrNull
+                val id = obj["id"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["_id"]?.jsonPrimitive?.contentOrNull
+                    ?: "history-${timestamp ?: System.currentTimeMillis()}-$index"
+                val role = obj["role"]?.jsonPrimitive?.contentOrNull ?: return@mapIndexedNotNull null
+                val content = extractMessageText(obj) ?: ""
 
+                Log.d(TAG, "Parsed history message: id=$id, role=$role, content=${content.take(50)}...")
                 ChatHistoryMessage(id, role, content, timestamp)
             } ?: emptyList()
 
+            Log.d(TAG, "chat.history parsed ${messages.size} messages")
             Result.success(messages)
         } catch (e: Exception) {
+            Log.e(TAG, "chat.history error", e)
             Result.failure(e)
         }
     }
@@ -460,7 +455,7 @@ class GatewayServiceImpl @Inject constructor(
         return try {
             val params = buildJsonObject {
                 put("skillKey", skillKey)
-                put("disabled", !enabled)
+                put("enabled", enabled)
             }
             request("skills.update", params)
             Log.d(TAG, "Updated skill $skillKey: enabled=$enabled")
@@ -510,9 +505,12 @@ class GatewayServiceImpl @Inject constructor(
                 }
             }
 
+            // raw must be a JSON string, not an object
+            val rawString = Json.encodeToString(JsonObject.serializer(), patchConfig)
+
             val params = buildJsonObject {
                 put("baseHash", baseHash)
-                put("config", patchConfig)
+                put("raw", rawString)
             }
 
             request("config.patch", params)

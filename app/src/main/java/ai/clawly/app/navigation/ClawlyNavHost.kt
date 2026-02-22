@@ -4,6 +4,7 @@ import ai.clawly.app.BuildConfig
 import ai.clawly.app.presentation.apikeys.ApiKeysScreen
 import ai.clawly.app.presentation.chat.ChatScreen
 import ai.clawly.app.presentation.gateway.GatewayConfigScreen
+import ai.clawly.app.presentation.login.LoginScreen
 import ai.clawly.app.presentation.onboarding.OnboardingScreen
 import ai.clawly.app.presentation.paywall.PaywallScreen
 import ai.clawly.app.presentation.paywall.PaywallViewModel
@@ -24,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,11 +42,22 @@ fun ClawlyNavHost(
     navController: NavHostController = rememberNavController(),
     startDestination: Any = ChatRoute,
     showOnboarding: Boolean = false,
-    onOnboardingComplete: () -> Unit = {}
+    isFirebaseSignedIn: Boolean = true,
+    onOnboardingComplete: () -> Unit = {},
+    onSignedOut: () -> Unit = {},
+    navHostViewModel: NavHostViewModel = hiltViewModel()
 ) {
+    // Remember the initial start destination so recompositions don't reset the NavHost
+    val resolvedStart = remember {
+        when {
+            showOnboarding -> OnboardingRoute
+            else -> startDestination
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = if (showOnboarding) OnboardingRoute else startDestination,
+        startDestination = resolvedStart,
         modifier = modifier
     ) {
         // Onboarding
@@ -53,14 +66,36 @@ fun ClawlyNavHost(
                 onComplete = {
                     // Mark onboarding as completed so it won't show again
                     onOnboardingComplete()
-                    // After onboarding, show appropriate paywall based on build flavor
+                    // After onboarding, route based on build flavor
                     if (BuildConfig.IS_WEB3) {
                         navController.navigate(Web3PaywallRoute) {
                             popUpTo(OnboardingRoute) { inclusive = true }
                         }
                     } else {
+                        // Web2: Paywall first, then Login after
                         navController.navigate(PaywallRoute) {
                             popUpTo(OnboardingRoute) { inclusive = true }
+                        }
+                    }
+                }
+            )
+        }
+
+        // Login (Web2 only — Google Sign-In)
+        composable<LoginRoute> {
+            LoginScreen(
+                onSignedIn = {
+                    // Pop back to wherever we came from (Settings or start)
+                    if (!navController.popBackStack()) {
+                        navController.navigate(ChatRoute) {
+                            popUpTo(LoginRoute) { inclusive = true }
+                        }
+                    }
+                },
+                onDismiss = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate(ChatRoute) {
+                            popUpTo(LoginRoute) { inclusive = true }
                         }
                     }
                 }
@@ -83,6 +118,9 @@ fun ClawlyNavHost(
                 },
                 onNavigateToProviderSetup = {
                     navController.navigate(ProviderSetupRoute)
+                },
+                onNavigateToLogin = {
+                    navController.navigate(LoginRoute)
                 }
             )
         }
@@ -94,6 +132,16 @@ fun ClawlyNavHost(
                     if (navController.currentBackStackEntry != null) {
                         navController.popBackStack()
                     }
+                },
+                onSignedOut = {
+                    // Navigate to login, clearing entire backstack
+                    navController.navigate(LoginRoute) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                    onSignedOut()
+                },
+                onNavigateToLogin = {
+                    navController.navigate(LoginRoute)
                 },
                 onNavigateToSkills = {
                     navController.navigate(SkillsRoute)
@@ -214,11 +262,11 @@ fun ClawlyNavHost(
                     }
                 },
                 onNavigateToChat = { message ->
-                    // Navigate to chat with pre-filled message
+                    // Set pending message before navigating
+                    navHostViewModel.setPendingMessage(message)
                     navController.navigate(ChatRoute) {
                         popUpTo(ChatRoute) { inclusive = true }
                     }
-                    // Note: Message passing can be done via shared ViewModel or SavedStateHandle
                 }
             )
         }

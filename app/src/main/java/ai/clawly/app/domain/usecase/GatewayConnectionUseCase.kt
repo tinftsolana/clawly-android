@@ -37,7 +37,7 @@ class GatewayConnectionUseCase @Inject constructor(
     init {
         // Auto-connect on app start
         scope.launch {
-            Log.d(TAG, "Auto-connecting on init")
+            Log.d(TAG, "Auto-connecting on init, current status: ${connectionStatus.value}")
             gatewayService.connect()
         }
         // Observe app lifecycle
@@ -49,11 +49,14 @@ class GatewayConnectionUseCase @Inject constructor(
     override fun onStart(owner: LifecycleOwner) {
         isAppForeground = true
         val current = connectionStatus.value
+        Log.d(TAG, "onStart: current status = $current")
         if (current !is ConnectionStatus.Online && current !is ConnectionStatus.Connecting) {
             Log.d(TAG, "App foregrounded, auto-reconnecting (was: $current)")
             scope.launch {
                 gatewayService.connect()
             }
+        } else {
+            Log.d(TAG, "App foregrounded, already Online or Connecting, skipping reconnect")
         }
     }
 
