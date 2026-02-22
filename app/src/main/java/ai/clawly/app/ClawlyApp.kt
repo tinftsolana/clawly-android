@@ -1,8 +1,12 @@
 package ai.clawly.app
 
+import ai.clawly.app.BuildConfig
+import ai.clawly.app.data.auth.FirebaseAuthService
+import ai.clawly.app.data.auth.FirebaseAuthState
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.navigation.ClawlyNavHost
 import ai.clawly.app.ui.theme.ClawlyColors
+import com.revenuecat.purchases.Purchases
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -20,12 +24,14 @@ import javax.inject.Inject
 
 data class AppUiState(
     val isLoading: Boolean = true,
-    val showOnboarding: Boolean = false
+    val showOnboarding: Boolean = false,
+    val isFirebaseSignedIn: Boolean = false
 )
 
 @HiltViewModel
 class AppViewModel @Inject constructor(
-    private val preferences: GatewayPreferences
+    private val preferences: GatewayPreferences,
+    private val firebaseAuthService: FirebaseAuthService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AppUiState())
@@ -34,17 +40,38 @@ class AppViewModel @Inject constructor(
     init {
         checkOnboardingStatus()
         observeDebugSettings()
+        observeFirebaseAuth()
     }
 
     private fun checkOnboardingStatus() {
         viewModelScope.launch {
             val alwaysShow = preferences.alwaysShowOnboarding.first()
             val completed = preferences.onboardingCompleted.first()
+            val signedIn = if (BuildConfig.IS_WEB2) firebaseAuthService.isSignedIn else true
 
             _uiState.value = AppUiState(
                 isLoading = false,
-                showOnboarding = alwaysShow || !completed
+                showOnboarding = alwaysShow || !completed,
+                isFirebaseSignedIn = signedIn
             )
+
+            // Re-associate RevenueCat on app start if already signed in
+            if (BuildConfig.IS_WEB2 && signedIn) {
+                firebaseAuthService.firebaseUid?.let { uid ->
+                    try {
+                        Purchases.sharedInstance.logIn(uid, null)
+                    } catch (_: Exception) { }
+                }
+            }
+        }
+    }
+
+    private fun observeFirebaseAuth() {
+        viewModelScope.launch {
+            firebaseAuthService.authState.collect { state ->
+                val signedIn = state is FirebaseAuthState.Authenticated
+                _uiState.value = _uiState.value.copy(isFirebaseSignedIn = signedIn)
+            }
         }
     }
 
@@ -95,6 +122,7 @@ fun ClawlyApp(
                 .fillMaxSize()
                 .background(ClawlyColors.background),
             showOnboarding = uiState.showOnboarding,
+            isFirebaseSignedIn = uiState.isFirebaseSignedIn,
             onOnboardingComplete = { viewModel.completeOnboarding() }
         )
     }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +44,41 @@ fun SkillsScreen(
     viewModel: SkillsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // Compute available skills (reactive to state changes)
+    val availableSkills = remember(uiState.skills) {
+        uiState.skills.filter { skill ->
+            skill.missingRequirements?.hasMissingBins != true
+        }
+    }
+
+    // Compute filtered skills
+    val filteredSkills = remember(availableSkills, uiState.selectedFilter, uiState.searchText) {
+        var result = availableSkills
+        result = when (uiState.selectedFilter) {
+            SkillFilter.All -> result
+            SkillFilter.Active -> result.filter { it.isEnabled }
+            SkillFilter.Inactive -> result.filter { !it.isEnabled }
+        }
+        if (uiState.searchText.isNotEmpty()) {
+            result = result.filter { skill ->
+                skill.name.contains(uiState.searchText, ignoreCase = true) ||
+                        skill.description.contains(uiState.searchText, ignoreCase = true)
+            }
+        }
+        result
+    }
+
+    // Compute counts for filter chips
+    val countForFilter: (SkillFilter) -> Int = remember(availableSkills) {
+        { filter ->
+            when (filter) {
+                SkillFilter.All -> availableSkills.size
+                SkillFilter.Active -> availableSkills.count { it.isEnabled }
+                SkillFilter.Inactive -> availableSkills.count { !it.isEnabled }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.fetchSkills()
@@ -97,7 +134,7 @@ fun SkillsScreen(
             SkillsFilterChips(
                 selectedFilter = uiState.selectedFilter,
                 onFilterSelected = { viewModel.setFilter(it) },
-                countForFilter = { viewModel.countForFilter(it) }
+                countForFilter = countForFilter
             )
 
             // Skills list
@@ -174,7 +211,7 @@ fun SkillsScreen(
                     }
 
                     // Skills
-                    items(viewModel.filteredSkills, key = { it.id }) { skill ->
+                    items(filteredSkills, key = { it.id }) { skill ->
                         SkillCard(
                             skill = skill,
                             onToggle = { viewModel.toggleSkill(skill.id) },
@@ -503,7 +540,11 @@ private fun CreateSkillSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(top = 8.dp)
+                .navigationBarsPadding()
+                .imePadding()
         ) {
             Text(
                 text = "Create Skill",
@@ -615,7 +656,7 @@ private fun CreateSkillSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

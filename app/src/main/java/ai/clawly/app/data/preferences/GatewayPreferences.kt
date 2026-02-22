@@ -56,6 +56,7 @@ class GatewayPreferences @Inject constructor(
         private val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         private val KEY_DEBUG_PREMIUM_OVERRIDE = booleanPreferencesKey("debug_premium_override")
         private val KEY_DEBUG_PREMIUM_ACTIVE = booleanPreferencesKey("debug_premium_active")
+        private val KEY_BACKEND_USER_ID = stringPreferencesKey("backend_user_id")
     }
 
     // Gateway URL
@@ -466,6 +467,23 @@ class GatewayPreferences @Inject constructor(
         dataStore.edit { prefs ->
             prefs.remove(KEY_GATEWAY_URL)
             prefs.remove(KEY_GATEWAY_TOKEN)
+        }
+    }
+
+    // Backend User ID (returned from POST /auth/login)
+    suspend fun setBackendUserId(userId: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_BACKEND_USER_ID] = userId
+        }
+    }
+
+    suspend fun getBackendUserIdSync(): String? {
+        return dataStore.data.first()[KEY_BACKEND_USER_ID]
+    }
+
+    suspend fun clearBackendUserId() {
+        dataStore.edit { prefs ->
+            prefs.remove(KEY_BACKEND_USER_ID)
         }
     }
 }

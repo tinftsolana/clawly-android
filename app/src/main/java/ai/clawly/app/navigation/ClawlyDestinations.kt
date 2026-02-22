@@ -52,4 +52,7 @@ object SkillsRoute
 object ApiKeysRoute
 
 @Serializable
+object LoginRoute
+
+@Serializable
 object Web3PaywallRoute

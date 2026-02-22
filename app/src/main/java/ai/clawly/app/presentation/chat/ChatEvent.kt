@@ -5,6 +5,7 @@ package ai.clawly.app.presentation.chat
  */
 sealed class ChatEvent {
     data object ShowPaywall : ChatEvent()
+    data object ShowLogin : ChatEvent()
     data object ShowConfigPrompt : ChatEvent()
     data object ShowProviderSetup : ChatEvent()
     data class ShowError(val message: String) : ChatEvent()

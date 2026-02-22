@@ -2,6 +2,7 @@ package ai.clawly.app.presentation.chat
 
 import ai.clawly.app.BuildConfig
 import ai.clawly.app.analytics.AmplitudeAnalyticsService
+import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.gateway.GatewayService
 import ai.clawly.app.domain.manager.SkillsManager
@@ -33,7 +34,9 @@ class ChatViewModel @Inject constructor(
     private val skillsManager: SkillsManager,
     private val getUserIdentityUseCase: GetUserIdentityUseCase,
     private val web3CreditsUseCase: Web3CreditsUseCase,
-    private val gatewayConnectionUseCase: GatewayConnectionUseCase
+    private val gatewayConnectionUseCase: GatewayConnectionUseCase,
+    private val firebaseAuthService: FirebaseAuthService,
+    private val pendingMessageHolder: PendingMessageHolder
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -48,9 +51,6 @@ class ChatViewModel @Inject constructor(
     // Last user message for retry
     private var lastUserMessage: String? = null
     private var hasLoadedHistory = false
-
-    // Response timeout
-    private var timeoutJob: Job? = null
 
     val assistantName = "Clawly"
 
@@ -67,6 +67,18 @@ class ChatViewModel @Inject constructor(
         if (BuildConfig.IS_WEB3) {
             observeWeb3Credits()
         }
+        checkAndSendPendingMessage()
+    }
+
+    private fun checkAndSendPendingMessage() {
+        pendingMessageHolder.consumePendingMessage()?.let { message ->
+            Log.d(TAG, "Found pending message, sending: ${message.take(50)}...")
+            viewModelScope.launch {
+                // Small delay to ensure connection is ready
+                delay(500)
+                sendMessage(message)
+            }
+        }
     }
 
     private fun observeWeb3Credits() {
@@ -82,6 +94,16 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val messages = chatRepository.loadMessages()
             _uiState.update { it.copy(messages = messages) }
+        }
+        // Also observe for when messages are cleared (on logout)
+        viewModelScope.launch {
+            chatRepository.messages.collect { persistedMessages ->
+                if (persistedMessages.isEmpty() && _uiState.value.messages.isNotEmpty()) {
+                    Log.d(TAG, "Persisted messages cleared, clearing UI state")
+                    _uiState.update { it.copy(messages = emptyList()) }
+                    hasLoadedHistory = false
+                }
+            }
         }
     }
 
@@ -196,12 +218,18 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun mergeHistoryWithLocal(historyMessages: List<ai.clawly.app.domain.repository.ChatHistoryMessage>) {
+        Log.d(TAG, "mergeHistoryWithLocal: received ${historyMessages.size} history messages")
         val currentMessages = _uiState.value.messages
+        Log.d(TAG, "mergeHistoryWithLocal: current local messages: ${currentMessages.size}")
         val localIds = currentMessages.map { it.id }.toSet()
         val newMessages = mutableListOf<ChatMessage>()
 
         for (histMsg in historyMessages) {
-            if (histMsg.id in localIds) continue
+            Log.d(TAG, "History msg: id=${histMsg.id}, role=${histMsg.role}, content=${histMsg.content.take(30)}...")
+            if (histMsg.id in localIds) {
+                Log.d(TAG, "  -> Skipping, already in local")
+                continue
+            }
 
             val chatMsg = ChatMessage(
                 id = histMsg.id,
@@ -210,15 +238,17 @@ class ChatViewModel @Inject constructor(
                 timestamp = histMsg.timestamp ?: System.currentTimeMillis()
             )
             newMessages.add(chatMsg)
+            Log.d(TAG, "  -> Added to newMessages")
         }
 
+        Log.d(TAG, "mergeHistoryWithLocal: ${newMessages.size} new messages to merge")
         if (newMessages.isNotEmpty()) {
             val merged = newMessages + currentMessages
             _uiState.update { it.copy(messages = merged) }
             viewModelScope.launch {
                 chatRepository.saveMessages(merged)
             }
-            Log.d(TAG, "Merged ${newMessages.size} messages from history")
+            Log.d(TAG, "Merged ${newMessages.size} messages from history, total now: ${merged.size}")
         }
     }
 
@@ -315,6 +345,12 @@ class ChatViewModel @Inject constructor(
         }
 
         // Non-premium users
+        // Web2: if not signed in, prompt login first
+        if (BuildConfig.IS_WEB2 && !firebaseAuthService.isSignedIn) {
+            Log.d(TAG, "Validation failed: web2 user not signed in")
+            return SendValidationResult.ShowLogin
+        }
+
         // If not connected, show paywall immediately
         if (!state.isConnected) {
             return SendValidationResult.ShowPaywall
@@ -350,6 +386,10 @@ class ChatViewModel @Inject constructor(
             }
             SendValidationResult.ShowPaywall -> {
                 viewModelScope.launch { _events.emit(ChatEvent.ShowPaywall) }
+                return
+            }
+            SendValidationResult.ShowLogin -> {
+                viewModelScope.launch { _events.emit(ChatEvent.ShowLogin) }
                 return
             }
             SendValidationResult.ShowConfigPrompt -> {
@@ -423,39 +463,9 @@ class ChatViewModel @Inject constructor(
                 handleSendError(error)
             }
         }
-
-        // Start timeout
-        startResponseTimeout()
-    }
-
-    private fun startResponseTimeout() {
-        timeoutJob?.cancel()
-        val timeout = if (_uiState.value.thinkingLevel == ThinkingLevel.High) 150_000L else 120_000L
-
-        timeoutJob = viewModelScope.launch {
-            delay(timeout)
-            if (_uiState.value.isAssistantTyping) {
-                val timeoutMessage = ChatMessage.errorMessage(
-                    "Response timed out. The server might be busy.",
-                    ChatErrorType.Timeout
-                )
-                val updatedMessages = _uiState.value.messages + timeoutMessage
-
-                _uiState.update {
-                    it.copy(
-                        messages = updatedMessages,
-                        isAssistantTyping = false,
-                        streamingContent = ""
-                    )
-                }
-                chatRepository.saveMessages(updatedMessages)
-            }
-        }
     }
 
     private fun handleSendError(error: Throwable) {
-        timeoutJob?.cancel()
-
         val errorMessage = ChatMessage.errorMessage(
             "Failed to send message. Please check your connection.",
             ChatErrorType.SendFailed
@@ -478,8 +488,6 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun handleIncomingMessage(message: GatewayMessage) {
-        timeoutJob?.cancel()
-
         _uiState.update {
             it.copy(isAssistantTyping = false, streamingContent = "")
         }
@@ -535,8 +543,6 @@ class ChatViewModel @Inject constructor(
                     }
                     Log.e(TAG, "Abort failed", error)
                 }
-
-            timeoutJob?.cancel()
         }
     }
 
@@ -565,8 +571,6 @@ class ChatViewModel @Inject constructor(
                     handleSendError(error)
                 }
             }
-
-            startResponseTimeout()
         }
     }
 

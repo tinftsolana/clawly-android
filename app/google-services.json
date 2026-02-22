@@ -12,7 +12,20 @@
           "package_name": "ai.clawly.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "187834608967-ve5oiorrnuqv55q67qf8rc88p9p20pin.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ai.clawly.app",
+            "certificate_hash": "9dba035714b0b0cab3373d1b337c9fc71d06df81"
+          }
+        },
+        {
+          "client_id": "187834608967-fgu627vsccqcg93lq0lpju8l9ha77g77.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBsLQGScToHGg4y4GkDN1s9iJ9i01ECCKA"
@@ -20,7 +33,20 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "187834608967-fgu627vsccqcg93lq0lpju8l9ha77g77.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "187834608967-90bmrjdo1lvhf2sesvhimkounf2mb96n.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "ai.clawdbot",
+                "app_store_id": "6759046611"
+              }
+            }
+          ]
         }
       }
     }

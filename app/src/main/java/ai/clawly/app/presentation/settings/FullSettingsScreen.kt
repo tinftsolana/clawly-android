@@ -5,7 +5,10 @@ import ai.clawly.app.domain.model.ConnectionStatus
 import ai.clawly.app.domain.model.HostingType
 import ai.clawly.app.presentation.wallet.WalletViewModel
 import ai.clawly.app.ui.theme.ClawlyColors
+import ai.clawly.app.ui.util.DrawIfWeb2
 import ai.clawly.app.ui.util.DrawIfWeb3
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -33,6 +36,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +45,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 /**
  * Full Settings screen matching iOS SettingsView.swift exactly
@@ -50,6 +57,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun FullSettingsScreen(
     onBackClick: () -> Unit,
+    onSignedOut: () -> Unit = {},
+    onNavigateToLogin: () -> Unit = {},
     onNavigateToSkills: () -> Unit,
     onNavigateToApiKeys: () -> Unit,
     onNavigateToPaywall: () -> Unit,
@@ -65,9 +74,18 @@ fun FullSettingsScreen(
     var showAdvanced by remember { mutableStateOf(false) }
     var showDisconnectConfirmation by remember { mutableStateOf(false) }
 
-    // Refresh auth config when screen appears
-    LaunchedEffect(Unit) {
-        viewModel.refreshAuthConfig()
+    // Refresh auth config every time screen resumes (back from setup, etc.)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshAuthConfig()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Debounce navigation to prevent rapid taps causing white screen
@@ -79,6 +97,7 @@ fun FullSettingsScreen(
         }
     }
 
+    val context = LocalContext.current
     val density = LocalDensity.current
     val glowColor = ClawlyColors.accentPrimary
     val topBarHeight = 56.dp
@@ -125,8 +144,35 @@ fun FullSettingsScreen(
         ) {
             val config = uiState.currentAuthConfig
 
-            // CLAWLY Section - First and most prominent
-            SettingsSection(title = "CLAWLY", isFirst = true) {
+            // ACCOUNT Section (Web2 only — Firebase Auth)
+            DrawIfWeb2 {
+                if (uiState.isFirebaseSignedIn) {
+                    SettingsSection(title = "ACCOUNT", isFirst = true) {
+                        SettingsRow(
+                            icon = Icons.Default.Person,
+                            iconTint = ClawlyColors.accentPrimary,
+                            title = uiState.firebaseUserName ?: "User",
+                            subtitle = uiState.firebaseUserEmail,
+                            showChevron = false
+                        )
+                        SettingsDivider()
+                        SettingsRow(
+                            icon = Icons.AutoMirrored.Filled.ExitToApp,
+                            iconTint = ClawlyColors.error,
+                            title = "Sign Out",
+                            titleColor = ClawlyColors.error,
+                            onClick = {
+                                viewModel.signOutFirebase()
+                                onSignedOut()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // CLAWLY Section
+            val isClawlyFirst = !(BuildConfig.IS_WEB2 && uiState.isFirebaseSignedIn)
+            SettingsSection(title = "CLAWLY", isFirst = isClawlyFirst) {
                 if (config.isConfigured || config.isProvisioning) {
                     // Show Clawly status when configured
                     SettingsRow(
@@ -211,15 +257,20 @@ fun FullSettingsScreen(
                     )
                 } else {
                     // Not configured - show setup CTA
-                    // If no premium, go to paywall first
+                    // Web2: must be signed in first, then premium check
                     SettingsRow(
                         icon = Icons.Default.Favorite,
                         iconTint = ClawlyColors.accentPrimary,
                         title = "Set Up Clawly",
-                        subtitle = "Get started with your AI assistant",
+                        subtitle = if (BuildConfig.IS_WEB2 && !uiState.isFirebaseSignedIn)
+                            "Sign in to get started"
+                        else
+                            "Get started with your AI assistant",
                         titleColor = ClawlyColors.accentPrimary,
                         onClick = {
-                            if (uiState.isPremium) {
+                            if (BuildConfig.IS_WEB2 && !uiState.isFirebaseSignedIn) {
+                                onNavigateToLogin()
+                            } else if (uiState.isPremium) {
                                 onNavigateToAuthProvider()
                             } else {
                                 onNavigateToPaywall()
@@ -306,7 +357,7 @@ fun FullSettingsScreen(
             SettingsSection(title = "AGENT") {
                 SettingsRow(
                     icon = Icons.Default.Star,
-                    iconTint = if (isAgentConfigured) ClawlyColors.warning else ClawlyColors.textMuted,
+                    iconTint = if (isAgentConfigured) ClawlyColors.accentPrimary else ClawlyColors.textMuted,
                     title = "Skills",
                     subtitle = if (isAgentConfigured) "Manage agent capabilities" else "Configure Clawly first",
                     enabled = isAgentConfigured,
@@ -315,7 +366,7 @@ fun FullSettingsScreen(
                 SettingsDivider()
                 SettingsRow(
                     icon = Icons.Default.Lock,
-                    iconTint = if (isAgentConfigured) Color.Yellow else ClawlyColors.textMuted,
+                    iconTint = if (isAgentConfigured) ClawlyColors.accentPrimary else ClawlyColors.textMuted,
                     title = "API Keys",
                     subtitle = if (isAgentConfigured) "Configure secrets for skills" else "Configure Clawly first",
                     enabled = isAgentConfigured,
@@ -328,7 +379,7 @@ fun FullSettingsScreen(
             SettingsSection(title = "ABOUT") {
                 SettingsRow(
                     icon = Icons.Default.Info,
-                    iconTint = ClawlyColors.accentSecondary,
+                    iconTint = ClawlyColors.accentPrimary,
                     title = "Version",
                     value = "1.0.0",
                     showChevron = false
@@ -336,23 +387,35 @@ fun FullSettingsScreen(
                 SettingsDivider()
                 SettingsRow(
                     icon = Icons.Default.Lock,
-                    iconTint = Color.Blue,
+                    iconTint = ClawlyColors.accentPrimary,
                     title = "Privacy Policy",
-                    onClick = { /* Open URL */ }
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://docs.google.com/document/d/1s6ijRCCVNSvLnlC4andYPRJUUxveskF6c-2Km0sZdYU/edit?usp=sharing"))
+                        context.startActivity(intent)
+                    }
                 )
                 SettingsDivider()
                 SettingsRow(
                     icon = Icons.Default.List,
-                    iconTint = Color(0xFFFFA500),
+                    iconTint = ClawlyColors.accentPrimary,
                     title = "Terms of Use",
-                    onClick = { /* Open URL */ }
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://docs.google.com/document/d/1NUAcle14HNFpF8-JsKhEKdVnuXcNRg9uFlWV9uFbIUM/edit?usp=sharing"))
+                        context.startActivity(intent)
+                    }
                 )
                 SettingsDivider()
                 SettingsRow(
                     icon = Icons.Default.Email,
-                    iconTint = Color.Green,
+                    iconTint = ClawlyColors.accentPrimary,
                     title = "Contact Us",
-                    onClick = { /* Open email */ }
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:clawlyagent@clawlyai.io")
+                            putExtra(Intent.EXTRA_SUBJECT, "Clawly App Feedback")
+                        }
+                        context.startActivity(intent)
+                    }
                 )
             }
 
