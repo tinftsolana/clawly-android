@@ -287,23 +287,12 @@ class AuthProviderRepositoryImpl @Inject constructor(
         if (info.isReady && !info.gatewayUrl.isNullOrEmpty()) {
             stopPolling()
 
-            // Auto-activate OpenClaw proxy for credit-based usage (only if not already activated)
+            // OpenClaw proxy is pre-configured on the server by default
+            // No need to call activate - just set the preference
             val currentProvider = runBlocking { preferences.getSelectedAiProviderSync() }
             if (currentProvider != "openclaw") {
-                Log.d(TAG, "Instance ready, activating OpenClaw proxy...")
-                val activateResult = controlPlaneService.activateOpenClawProxy(info.tenantId)
-                activateResult.fold(
-                    onSuccess = {
-                        Log.d(TAG, "OpenClaw proxy activated successfully")
-                        preferences.setSelectedAiProvider("openclaw")
-                    },
-                    onFailure = { e ->
-                        Log.e(TAG, "Failed to activate OpenClaw proxy", e)
-                        // Continue anyway - user can manually set up provider in Advanced
-                    }
-                )
-            } else {
-                Log.d(TAG, "OpenClaw proxy already activated, skipping")
+                Log.d(TAG, "Instance ready, setting OpenClaw as default provider (pre-configured on server)")
+                preferences.setSelectedAiProvider("openclaw")
             }
 
             // Only update preferences and reconnect if URL changed

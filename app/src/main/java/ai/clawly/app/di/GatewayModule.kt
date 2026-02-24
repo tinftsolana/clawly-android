@@ -1,6 +1,7 @@
 package ai.clawly.app.di
 
 import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.remote.gateway.GatewayService
 import ai.clawly.app.data.remote.gateway.GatewayServiceImpl
@@ -37,9 +38,10 @@ object GatewayModule {
     @Singleton
     fun provideGatewayService(
         preferences: GatewayPreferences,
-        deviceIdentityManager: DeviceIdentityManager
+        deviceIdentityManager: DeviceIdentityManager,
+        controlPlaneService: ControlPlaneService
     ): GatewayService {
-        return GatewayServiceImpl(preferences, deviceIdentityManager)
+        return GatewayServiceImpl(preferences, deviceIdentityManager, controlPlaneService)
     }
 
     @Provides

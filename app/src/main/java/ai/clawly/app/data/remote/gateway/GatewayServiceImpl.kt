@@ -36,7 +36,8 @@ private const val TAG = "GatewayService"
 @Singleton
 class GatewayServiceImpl @Inject constructor(
     private val preferences: GatewayPreferences,
-    private val deviceIdentityManager: DeviceIdentityManager
+    private val deviceIdentityManager: DeviceIdentityManager,
+    private val controlPlaneService: ai.clawly.app.data.remote.ControlPlaneService
 ) : GatewayService {
 
     private val json = Json {
@@ -170,7 +171,11 @@ class GatewayServiceImpl @Inject constructor(
         connectJob = null
         connectNonce = null
         connectSent = false
-        connectAuthMode = ConnectAuthMode.TokenOnly
+        // Auth mode depends on hosting type:
+        // - Managed: start with SignedDevice (requires device field with signature)
+        // - Self-hosted: start with TokenOnly (no device field)
+        val hostingType = preferences.getHostingTypeSync()
+        connectAuthMode = if (hostingType == "managed") ConnectAuthMode.SignedDevice else ConnectAuthMode.TokenOnly
         lastTokenSource = TokenSource.None
         didRetryAfterTokenMismatch = false
         pendingRequests.clear()
@@ -718,8 +723,9 @@ class GatewayServiceImpl @Inject constructor(
 
             when {
                 code == "NOT_PAIRED" -> {
-                    val requestId = error?.get("details")?.jsonObject
-                        ?.get("requestId")?.jsonPrimitive?.contentOrNull
+                    // Try both locations: error.requestId (per guide) and error.details.requestId (legacy)
+                    val requestId = error?.get("requestId")?.jsonPrimitive?.contentOrNull
+                        ?: error?.get("details")?.jsonObject?.get("requestId")?.jsonPrimitive?.contentOrNull
                     pending.reject(GatewayError.NotPaired(requestId))
                 }
                 message.lowercase().contains("device identity required") -> {
@@ -736,32 +742,62 @@ class GatewayServiceImpl @Inject constructor(
         if (connectSent) return
         connectSent = true
 
-        val scopes = listOf("operator.admin", "operator.approvals", "operator.pairing")
+        val scopes = listOf("operator.admin", "operator.approvals", "operator.pairing", "operator.write")
         val role = "operator"
-        val clientId = "openclaw-ios"  // Must match server's allowed client IDs
+        val clientId = "openclaw-android"  // Must match server's allowed client IDs
         val clientMode = "webchat"
         val signedAtMs = System.currentTimeMillis()
 
         val deviceToken = preferences.getDeviceTokenSync()
         val gatewayToken = preferences.getEffectiveGatewayToken().trim()
+        val hostingType = preferences.getHostingTypeSync()
+        val isManaged = hostingType == "managed"
 
-        val token = when {
-            deviceToken != null -> {
-                lastTokenSource = TokenSource.DeviceToken
-                deviceToken
+        // Token priority differs by hosting type:
+        // - Managed: deviceToken → gatewayToken (device token has priority)
+        // - Self-hosted: gatewayToken → deviceToken (gateway token has priority)
+        val token = if (isManaged) {
+            when {
+                deviceToken != null -> {
+                    lastTokenSource = TokenSource.DeviceToken
+                    deviceToken
+                }
+                gatewayToken.isNotEmpty() -> {
+                    lastTokenSource = TokenSource.GatewayToken
+                    gatewayToken
+                }
+                else -> {
+                    lastTokenSource = TokenSource.None
+                    ""
+                }
             }
-            gatewayToken.isNotEmpty() -> {
-                lastTokenSource = TokenSource.GatewayToken
-                gatewayToken
-            }
-            else -> {
-                lastTokenSource = TokenSource.None
-                ""
+        } else {
+            // Self-hosted: gateway token first
+            when {
+                gatewayToken.isNotEmpty() -> {
+                    lastTokenSource = TokenSource.GatewayToken
+                    gatewayToken
+                }
+                deviceToken != null -> {
+                    lastTokenSource = TokenSource.DeviceToken
+                    deviceToken
+                }
+                else -> {
+                    lastTokenSource = TokenSource.None
+                    ""
+                }
             }
         }
 
         val nonce = connectNonce
         val includeDevice = connectAuthMode == ConnectAuthMode.SignedDevice
+
+        // instanceId: for managed hosting use stable UUID (stored), for self-hosted use fixed string
+        val instanceId = if (isManaged) {
+            preferences.getOrCreateInstanceId()
+        } else {
+            "clawly"
+        }
 
         val device = if (includeDevice) {
             deviceIdentityManager.createSignedDevice(
@@ -778,7 +814,7 @@ class GatewayServiceImpl @Inject constructor(
                 put("version", BuildConfig.VERSION_NAME)
                 put("platform", "android")
                 put("mode", clientMode)
-                put("instanceId", "clawly")
+                put("instanceId", instanceId)
             }
             put("role", role)
             putJsonArray("scopes") { scopes.forEach { add(it) } }
@@ -810,8 +846,9 @@ class GatewayServiceImpl @Inject constructor(
         try {
             val response = request("connect", params, timeoutMs = 60_000)
 
-            val auth = response?.get("auth")?.jsonObject
-            val newDeviceToken = auth?.get("deviceToken")?.jsonPrimitive?.contentOrNull
+            // deviceToken is directly in payload (per guide), fallback to auth.deviceToken for compatibility
+            val newDeviceToken = response?.get("deviceToken")?.jsonPrimitive?.contentOrNull
+                ?: response?.get("auth")?.jsonObject?.get("deviceToken")?.jsonPrimitive?.contentOrNull
             if (!newDeviceToken.isNullOrEmpty()) {
                 preferences.setDeviceToken(newDeviceToken)
                 Log.d(TAG, "Saved device token (prefix: ${newDeviceToken.take(8)}...)")
@@ -940,5 +977,16 @@ class GatewayServiceImpl @Inject constructor(
     private fun cancelPendingConnect() {
         connectJob?.cancel()
         connectJob = null
+    }
+
+    override suspend fun approvePairingAndReconnect(requestId: String): Result<Unit> {
+        val tenantId = preferences.getTenantIdSync()
+            ?: return Result.failure(Exception("No tenant ID"))
+
+        return controlPlaneService.approvePairing(tenantId, requestId)
+            .onSuccess {
+                Log.d(TAG, "Pairing approved, reconnecting...")
+                reconnect()
+            }
     }
 }
