@@ -61,4 +61,7 @@ interface GatewayService {
 
     /** Configure skill environment variable */
     suspend fun configureSkillEnv(skillKey: String, envName: String, value: String): Result<Unit>
+
+    /** Approve pairing request and reconnect */
+    suspend fun approvePairingAndReconnect(requestId: String): Result<Unit>
 }

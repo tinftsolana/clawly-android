@@ -651,6 +651,35 @@ class ControlPlaneService @Inject constructor(
         }
     }
 
+    // MARK: - Pairing
+
+    /**
+     * Approve a device pairing request
+     * POST /instances/:tenantId/pairing/devices/:requestId/approve
+     */
+    suspend fun approvePairing(tenantId: String, requestId: String): Result<Unit> {
+        return try {
+            Log.d(TAG, "Approving pairing request: $requestId for tenant: $tenantId")
+
+            val response = client.post("$BASE_URL/instances/$tenantId/pairing/devices/$requestId/approve") {
+                contentType(ContentType.Application.Json)
+                setBody("{}")
+            }
+
+            if (response.status.isSuccess()) {
+                Log.d(TAG, "Pairing approved successfully")
+                Result.success(Unit)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Pairing approval failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Pairing approval error", e)
+            Result.failure(e)
+        }
+    }
+
     // MARK: - Private Helpers
 
     private fun GetTenantResponse.toManagedInstanceInfo(): ManagedInstanceInfo {

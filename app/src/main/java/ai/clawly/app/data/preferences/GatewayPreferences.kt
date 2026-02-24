@@ -57,6 +57,7 @@ class GatewayPreferences @Inject constructor(
         private val KEY_DEBUG_PREMIUM_OVERRIDE = booleanPreferencesKey("debug_premium_override")
         private val KEY_DEBUG_PREMIUM_ACTIVE = booleanPreferencesKey("debug_premium_active")
         private val KEY_BACKEND_USER_ID = stringPreferencesKey("backend_user_id")
+        private val KEY_DEVICE_INSTANCE_ID = stringPreferencesKey("device_instance_id")
     }
 
     // Gateway URL
@@ -172,6 +173,10 @@ class GatewayPreferences @Inject constructor(
                 prefs[KEY_MANAGED_TENANT_ID] = id
             }
         }
+    }
+
+    suspend fun getTenantIdSync(): String? {
+        return dataStore.data.first()[KEY_MANAGED_TENANT_ID]
     }
 
     val managedStatus: Flow<String?> = dataStore.data.map { prefs ->
@@ -485,5 +490,21 @@ class GatewayPreferences @Inject constructor(
         dataStore.edit { prefs ->
             prefs.remove(KEY_BACKEND_USER_ID)
         }
+    }
+
+    // Device Instance ID (stable UUID for managed hosting pairing)
+    suspend fun getOrCreateInstanceId(): String {
+        val existing = dataStore.data.first()[KEY_DEVICE_INSTANCE_ID]
+        if (!existing.isNullOrEmpty()) return existing
+
+        val newId = java.util.UUID.randomUUID().toString()
+        dataStore.edit { prefs ->
+            prefs[KEY_DEVICE_INSTANCE_ID] = newId
+        }
+        return newId
+    }
+
+    suspend fun getInstanceIdSync(): String? {
+        return dataStore.data.first()[KEY_DEVICE_INSTANCE_ID]
     }
 }
