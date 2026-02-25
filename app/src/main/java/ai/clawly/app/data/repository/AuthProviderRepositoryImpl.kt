@@ -227,16 +227,27 @@ class AuthProviderRepositoryImpl @Inject constructor(
 
         val error = result.exceptionOrNull()
         val errorText = (error?.message ?: error.toString()).lowercase()
-        val willRetry = attempt < 2 && errorText.contains("gateway_ws_open_timeout")
+        val timeoutRetry = attempt < 2 && errorText.contains("gateway_ws_open_timeout")
+        val pairingRequestRace = attempt < 2 &&
+            error is ai.clawly.app.data.remote.ControlPlaneException.ServerError &&
+            error.statusCode == 400 &&
+            error.message.contains("pairing_request_failed", ignoreCase = true)
+        val willRetry = timeoutRetry || pairingRequestRace
         Log.e(TAG, "Pairing approval failed ($source): $errorText")
 
         if (willRetry) {
             val nextAttempt = attempt + 1
-            val delayMs = (1.2 * nextAttempt * 1000).toLong()
+            val delayMs = if (pairingRequestRace) 350L else (1.2 * nextAttempt * 1000).toLong()
+            val retryRequestId = if (pairingRequestRace) {
+                resolvePendingPairingRequestIdFromList(tenantId, "$source:resolve-after-failed-approve")
+                    ?: requestIdToApprove
+            } else {
+                requestIdToApprove
+            }
             Log.d(TAG, "Retrying pairing approve in ${delayMs}ms ($source, attempt $nextAttempt)")
             delay(delayMs)
             autoApprovePairing(
-                requestId = requestIdToApprove,
+                requestId = retryRequestId,
                 source = "$source:retry",
                 reconnectAfterApproval = reconnectAfterApproval,
                 attempt = nextAttempt
