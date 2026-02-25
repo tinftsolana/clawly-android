@@ -4,13 +4,10 @@ import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.local.ChatPersistenceService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
-import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
-import ai.clawly.app.data.remote.gateway.GatewayService
 import ai.clawly.app.data.repository.AuthProviderRepositoryImpl
 import ai.clawly.app.data.repository.ChatRepositoryImpl
 import ai.clawly.app.domain.repository.AuthProviderRepository
 import ai.clawly.app.domain.repository.ChatRepository
-import ai.clawly.app.domain.repository.WalletRepository
 import android.content.Context
 import dagger.Module
 import dagger.Provides
@@ -51,13 +48,8 @@ object DataModule {
     @Provides
     @Singleton
     fun provideAuthProviderRepository(
-        preferences: GatewayPreferences,
-        controlPlaneService: ControlPlaneService,
-        gatewayService: GatewayService,
-        deviceIdentityManager: DeviceIdentityManager,
-        walletRepository: WalletRepository,
-        firebaseAuthService: FirebaseAuthService
+        repositoryImpl: AuthProviderRepositoryImpl
     ): AuthProviderRepository {
-        return AuthProviderRepositoryImpl(preferences, controlPlaneService, gatewayService, deviceIdentityManager, walletRepository, firebaseAuthService)
+        return repositoryImpl
     }
 }
