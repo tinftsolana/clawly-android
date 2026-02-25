@@ -265,7 +265,7 @@ fun FullSettingsScreen(
                         subtitle = "Get started with your AI assistant",
                         titleColor = ClawlyColors.accentPrimary,
                         onClick = {
-                            if (uiState.isPremium) {
+                            if (uiState.isPremium || uiState.allowSelfHostedWithoutPremium) {
                                 onNavigateToAuthProvider()
                             } else {
                                 onNavigateToPaywall()
@@ -839,47 +839,6 @@ private fun AdvancedContent(
 
         SettingsDivider()
 
-        // DEBUG section header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Build,
-                contentDescription = null,
-                tint = ClawlyColors.error,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = "DEBUG OPTIONS",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = ClawlyColors.secondaryText,
-                letterSpacing = 1.5.sp
-            )
-        }
-
-        // Show Onboarding toggle
-        SettingsToggleRow(
-            icon = null,
-            title = "Show Onboarding",
-            subtitle = "Shows onboarding on every app launch",
-            checked = uiState.alwaysShowOnboarding,
-            onCheckedChange = { viewModel.setAlwaysShowOnboarding(it) }
-        )
-
-        // Use Debug Defaults toggle
-        SettingsToggleRow(
-            icon = null,
-            title = "Use Debug Defaults",
-            checked = uiState.useDebugDefaults,
-            onCheckedChange = { viewModel.setUseDebugDefaults(it) }
-        )
-
         // Gateway Skills toggle
         SettingsToggleRow(
             icon = null,
@@ -888,148 +847,190 @@ private fun AdvancedContent(
             checked = uiState.gatewaySkillsEnabled,
             onCheckedChange = { viewModel.setGatewaySkillsEnabled(it) }
         )
-
-        // Override Premium toggle
-        var debugPremiumActive by remember { mutableStateOf(uiState.debugPremiumOverride != null) }
-        var debugPremiumValue by remember { mutableStateOf(uiState.debugPremiumOverride ?: false) }
-
-        SettingsToggleRow(
-            icon = null,
-            title = "Override Premium",
-            checked = debugPremiumActive,
-            onCheckedChange = { active ->
-                debugPremiumActive = active
-                if (active) {
-                    viewModel.setDebugPremiumOverride(debugPremiumValue)
-                } else {
-                    viewModel.setDebugPremiumOverride(null)
-                }
-            }
-        )
-
-        if (debugPremiumActive) {
-            SettingsToggleRow(
-                icon = null,
-                title = "Premium Active",
-                titleColor = if (debugPremiumValue) ClawlyColors.terminalGreen else ClawlyColors.textPrimary,
-                checked = debugPremiumValue,
-                onCheckedChange = {
-                    debugPremiumValue = it
-                    viewModel.setDebugPremiumOverride(it)
-                }
-            )
-        }
-
-        // Use Debug User ID toggle
-        SettingsToggleRow(
-            icon = null,
-            title = "Use Debug User ID",
-            subtitle = "Uses hardcoded user ID for testing",
-            checked = uiState.useDebugUserId,
-            onCheckedChange = { viewModel.setUseDebugUserId(it) }
-        )
-
-        // Use Bypass Token toggle
-        SettingsToggleRow(
-            icon = null,
-            title = "Use Bypass Token",
-            subtitle = "Skip RevenueCat subscription check",
-            checked = uiState.useBypassToken,
-            onCheckedChange = { viewModel.setUseBypassToken(it) }
-        )
-
-        if (uiState.useBypassToken) {
-            Column(
+        if (BuildConfig.DEBUG) {
+            // DEBUG section header
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 12.dp)
-                    .padding(start = 48.dp)
-                    .imePadding()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = null,
+                    tint = ClawlyColors.error,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = "Bypass Token",
+                    text = "DEBUG OPTIONS",
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = ClawlyColors.secondaryText
+                    fontWeight = FontWeight.SemiBold,
+                    color = ClawlyColors.secondaryText,
+                    letterSpacing = 1.5.sp
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = uiState.bypassToken,
-                    onValueChange = { viewModel.setBypassToken(it) },
-                    placeholder = { Text("Enter bypass token", fontSize = 15.sp) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = ClawlyColors.accentPrimary,
-                        unfocusedBorderColor = ClawlyColors.surfaceBorder,
-                        focusedTextColor = ClawlyColors.textPrimary,
-                        unfocusedTextColor = ClawlyColors.textPrimary
-                    )
-                )
+            }
 
-                // Add Debug Credits button
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = { viewModel.addDebugCredits() },
-                    enabled = uiState.bypassToken.isNotBlank() && !uiState.isAddingDebugCredits,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ClawlyColors.terminalGreen,
-                        disabledContainerColor = ClawlyColors.terminalGreen.copy(alpha = 0.3f)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    if (uiState.isAddingDebugCredits) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Adding Credits...")
+            // Show Onboarding toggle
+            SettingsToggleRow(
+                icon = null,
+                title = "Show Onboarding",
+                subtitle = "Shows onboarding on every app launch",
+                checked = uiState.alwaysShowOnboarding,
+                onCheckedChange = { viewModel.setAlwaysShowOnboarding(it) }
+            )
+
+            // Use Debug Defaults toggle
+            SettingsToggleRow(
+                icon = null,
+                title = "Use Debug Defaults",
+                checked = uiState.useDebugDefaults,
+                onCheckedChange = { viewModel.setUseDebugDefaults(it) }
+            )
+
+            // Override Premium toggle
+            var debugPremiumActive by remember { mutableStateOf(uiState.debugPremiumOverride != null) }
+            var debugPremiumValue by remember { mutableStateOf(uiState.debugPremiumOverride ?: false) }
+
+            SettingsToggleRow(
+                icon = null,
+                title = "Override Premium",
+                checked = debugPremiumActive,
+                onCheckedChange = { active ->
+                    debugPremiumActive = active
+                    if (active) {
+                        viewModel.setDebugPremiumOverride(debugPremiumValue)
                     } else {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Add 1B Debug Credits")
+                        viewModel.setDebugPremiumOverride(null)
                     }
                 }
+            )
 
-                // Result message
-                uiState.debugCreditsResult?.let { result ->
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val isError = result.startsWith("Error")
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (isError) ClawlyColors.error.copy(alpha = 0.15f)
-                                else ClawlyColors.terminalGreen.copy(alpha = 0.15f)
-                            )
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = result,
-                            fontSize = 14.sp,
-                            color = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen
-                        )
+            if (debugPremiumActive) {
+                SettingsToggleRow(
+                    icon = null,
+                    title = "Premium Active",
+                    titleColor = if (debugPremiumValue) ClawlyColors.terminalGreen else ClawlyColors.textPrimary,
+                    checked = debugPremiumValue,
+                    onCheckedChange = {
+                        debugPremiumValue = it
+                        viewModel.setDebugPremiumOverride(it)
                     }
-                    LaunchedEffect(result) {
-                        kotlinx.coroutines.delay(5000)
-                        viewModel.clearDebugCreditsResult()
+                )
+            }
+
+            // Use Debug User ID toggle
+            SettingsToggleRow(
+                icon = null,
+                title = "Use Debug User ID",
+                subtitle = "Uses hardcoded user ID for testing",
+                checked = uiState.useDebugUserId,
+                onCheckedChange = { viewModel.setUseDebugUserId(it) }
+            )
+
+            // Use Bypass Token toggle
+            SettingsToggleRow(
+                icon = null,
+                title = "Use Bypass Token",
+                subtitle = "Skip RevenueCat subscription check",
+                checked = uiState.useBypassToken,
+                onCheckedChange = { viewModel.setUseBypassToken(it) }
+            )
+
+            if (uiState.useBypassToken) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .padding(start = 48.dp)
+                        .imePadding()
+                ) {
+                    Text(
+                        text = "Bypass Token",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = ClawlyColors.secondaryText
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = uiState.bypassToken,
+                        onValueChange = { viewModel.setBypassToken(it) },
+                        placeholder = { Text("Enter bypass token", fontSize = 15.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ClawlyColors.accentPrimary,
+                            unfocusedBorderColor = ClawlyColors.surfaceBorder,
+                            focusedTextColor = ClawlyColors.textPrimary,
+                            unfocusedTextColor = ClawlyColors.textPrimary
+                        )
+                    )
+
+                    // Add Debug Credits button
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { viewModel.addDebugCredits() },
+                        enabled = uiState.bypassToken.isNotBlank() && !uiState.isAddingDebugCredits,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ClawlyColors.terminalGreen,
+                            disabledContainerColor = ClawlyColors.terminalGreen.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        if (uiState.isAddingDebugCredits) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Adding Credits...")
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add 1B Debug Credits")
+                        }
+                    }
+
+                    // Result message
+                    uiState.debugCreditsResult?.let { result ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val isError = result.startsWith("Error")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isError) ClawlyColors.error.copy(alpha = 0.15f)
+                                    else ClawlyColors.terminalGreen.copy(alpha = 0.15f)
+                                )
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = result,
+                                fontSize = 14.sp,
+                                color = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen
+                            )
+                        }
+                        LaunchedEffect(result) {
+                            kotlinx.coroutines.delay(5000)
+                            viewModel.clearDebugCreditsResult()
+                        }
                     }
                 }
             }

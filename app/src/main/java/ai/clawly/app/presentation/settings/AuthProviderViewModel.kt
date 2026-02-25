@@ -2,6 +2,7 @@ package ai.clawly.app.presentation.settings
 
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.repository.AuthProviderRepositoryImpl
+import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.model.AuthProviderConfig
 import ai.clawly.app.domain.model.ManagedInstanceStatus
 import ai.clawly.app.domain.repository.AuthProviderRepository
@@ -26,6 +27,7 @@ data class AuthProviderUiState(
     val provisioningStatus: ManagedInstanceStatus = ManagedInstanceStatus.Queued,
     val provisioningError: String? = null,
     val isReady: Boolean = false,
+    val hasPremiumAccess: Boolean = false,
     // Self-hosted dialog pre-filled values
     val selfHostedUrl: String = "",
     val selfHostedToken: String = ""
@@ -34,7 +36,8 @@ data class AuthProviderUiState(
 @HiltViewModel
 class AuthProviderViewModel @Inject constructor(
     private val repository: AuthProviderRepositoryImpl,
-    private val preferences: GatewayPreferences
+    private val preferences: GatewayPreferences,
+    private val purchaseService: PurchaseService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthProviderUiState())
@@ -42,6 +45,7 @@ class AuthProviderViewModel @Inject constructor(
 
     init {
         observeConfig()
+        observePremiumStatus()
     }
 
     private fun observeConfig() {
@@ -61,6 +65,14 @@ class AuthProviderViewModel @Inject constructor(
         viewModelScope.launch {
             repository.isSyncing.collect { syncing ->
                 _uiState.update { it.copy(isSyncing = syncing) }
+            }
+        }
+    }
+
+    private fun observePremiumStatus() {
+        viewModelScope.launch {
+            purchaseService.subscriptionStatus.collect { status ->
+                _uiState.update { it.copy(hasPremiumAccess = status.isActive) }
             }
         }
     }

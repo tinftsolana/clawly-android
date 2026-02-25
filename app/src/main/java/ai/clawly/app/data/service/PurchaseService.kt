@@ -22,7 +22,7 @@ import javax.inject.Singleton
 import kotlin.coroutines.resume
 
 private const val TAG = "PurchaseService"
-private const val ENTITLEMENT_ID = "pro" // Your entitlement ID in RevenueCat
+private const val ENTITLEMENT_ID = "premium" // RevenueCat entitlement ID
 
 data class SubscriptionStatus(
     val isActive: Boolean,
@@ -69,8 +69,11 @@ class PurchaseService @Inject constructor() {
     }
 
     private fun updateSubscriptionStatus(customerInfo: CustomerInfo) {
-        val entitlement = customerInfo.entitlements[ENTITLEMENT_ID]
-        val isActive = entitlement?.isActive == true
+        val explicitEntitlement = customerInfo.entitlements[ENTITLEMENT_ID]
+        val anyActiveEntitlement = customerInfo.entitlements.active.values.firstOrNull()
+        val entitlement = explicitEntitlement ?: anyActiveEntitlement
+        val hasActiveSubscription = customerInfo.activeSubscriptions.isNotEmpty()
+        val isActive = (entitlement?.isActive == true) || hasActiveSubscription
 
         _subscriptionStatus.value = SubscriptionStatus(
             isActive = isActive,
@@ -78,7 +81,12 @@ class PurchaseService @Inject constructor() {
             willRenew = entitlement?.willRenew == true
         )
 
-        Log.d(TAG, "Subscription status: isActive=$isActive")
+        Log.d(
+            TAG,
+            "Subscription status: isActive=$isActive, appUserId=${customerInfo.originalAppUserId}, " +
+                "expectedEntitlement=$ENTITLEMENT_ID, activeEntitlements=${customerInfo.entitlements.active.keys}, " +
+                "allEntitlements=${customerInfo.entitlements.all.keys}, activeSubscriptions=${customerInfo.activeSubscriptions}"
+        )
     }
 
     suspend fun fetchOfferings(): Result<List<ProductInfo>> = suspendCancellableCoroutine { cont ->
@@ -159,6 +167,23 @@ class PurchaseService @Inject constructor() {
                         if (userCancelled) {
                             Log.d(TAG, "Purchase cancelled by user")
                             cont.resume(Result.failure(Exception("Purchase cancelled")))
+                        } else if (error.message.contains("already active", ignoreCase = true)) {
+                            // Treat already-owned as success path and refresh customer info.
+                            Purchases.sharedInstance.getCustomerInfo(object : ReceiveCustomerInfoCallback {
+                                override fun onReceived(customerInfo: CustomerInfo) {
+                                    updateSubscriptionStatus(customerInfo)
+                                    Log.d(TAG, "Purchase already owned; refreshed status: isActive=${_subscriptionStatus.value.isActive}")
+                                    cont.resume(Result.success(_subscriptionStatus.value))
+                                }
+
+                                override fun onError(refreshError: PurchasesError) {
+                                    Log.e(
+                                        TAG,
+                                        "Failed to refresh customer info after already-owned purchase: ${refreshError.message}"
+                                    )
+                                    cont.resume(Result.failure(Exception(refreshError.message)))
+                                }
+                            })
                         } else {
                             Log.e(TAG, "Purchase error: ${error.message}")
                             cont.resume(Result.failure(Exception(error.message)))

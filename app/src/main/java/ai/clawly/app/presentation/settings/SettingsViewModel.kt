@@ -6,8 +6,10 @@ import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.auth.FirebaseAuthState
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
+import ai.clawly.app.data.remote.RemoteConfigFlags
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.remote.gateway.GatewayService
+import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.model.AuthProviderConfig
 import ai.clawly.app.domain.model.ConnectionStatus
 import ai.clawly.app.domain.model.HostingType
@@ -17,6 +19,7 @@ import ai.clawly.app.domain.repository.WalletRepository
 import ai.clawly.app.domain.usecase.GatewayConnectionUseCase
 import ai.clawly.app.domain.usecase.Web3CreditsUseCase
 import com.revenuecat.purchases.Purchases
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,7 +60,8 @@ data class SettingsUiState(
     val firebaseUserName: String? = null,
     val firebaseUserEmail: String? = null,
     val firebaseUserPhotoUrl: String? = null,
-    val isFirebaseSignedIn: Boolean = false
+    val isFirebaseSignedIn: Boolean = false,
+    val allowSelfHostedWithoutPremium: Boolean = false
 ) {
     /** Format credits for display (e.g., 1,000,000 → "1.0M") */
     val creditsFormatted: String
@@ -107,7 +111,8 @@ class SettingsViewModel @Inject constructor(
     private val gatewayConnectionUseCase: GatewayConnectionUseCase,
     private val chatRepository: ChatRepository,
     private val analytics: AmplitudeAnalyticsService,
-    private val firebaseAuthService: FirebaseAuthService
+    private val firebaseAuthService: FirebaseAuthService,
+    private val purchaseService: PurchaseService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -116,7 +121,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * Get current user ID
      * - Web3 builds: Uses wallet address (publicKey)
-     * - Web2 builds: Uses Firebase UID when signed in, device identity fallback
+     * - Web2 builds: Uses stable device identity
      */
     private val currentUserId: String
         get() {
@@ -134,19 +139,7 @@ class SettingsViewModel @Inject constructor(
                 android.util.Log.w("SettingsViewModel", "Web3 build but wallet not connected, falling back to device identity")
             }
 
-            // Web2 builds: Prefer backend userId (from POST /auth/login), then Firebase UID
-            if (BuildConfig.IS_WEB2) {
-                val backendUserId = runBlocking { preferences.getBackendUserIdSync() }
-                if (!backendUserId.isNullOrEmpty()) {
-                    return backendUserId
-                }
-                val firebaseUid = firebaseAuthService.firebaseUid
-                if (firebaseUid != null) {
-                    return firebaseUid
-                }
-            }
-
-            // Fallback: Use device identity
+            // Web2 + fallback: Use stable device identity
             val identity = runBlocking { deviceIdentityManager.loadOrCreateIdentity() }
             return identity?.deviceId ?: "android-${System.currentTimeMillis()}"
         }
@@ -154,9 +147,32 @@ class SettingsViewModel @Inject constructor(
     init {
         loadSettings()
         loadUserId()
+        loadRemoteFlags()
         observeAuthConfig()
         observeConnectionStatus()
         observeFirebaseAuth()
+    }
+
+    private fun loadRemoteFlags() {
+        val remoteConfig = FirebaseRemoteConfig.getInstance()
+
+        // Apply current cached value immediately.
+        _uiState.update {
+            it.copy(
+                allowSelfHostedWithoutPremium = remoteConfig.getBoolean(RemoteConfigFlags.KEY_SELF_HOSTED_WITHOUT_PREMIUM)
+            )
+        }
+
+        // Then refresh from backend; this resolves stale value during first screen open.
+        remoteConfig.fetchAndActivate()
+            .addOnCompleteListener { task ->
+                val enabled = remoteConfig.getBoolean(RemoteConfigFlags.KEY_SELF_HOSTED_WITHOUT_PREMIUM)
+                android.util.Log.d(
+                    "SettingsViewModel",
+                    "Remote flag updated: self_hosted_without_premium_enabled=$enabled, success=${task.isSuccessful}"
+                )
+                _uiState.update { it.copy(allowSelfHostedWithoutPremium = enabled) }
+            }
     }
 
     private fun loadUserId() {
@@ -233,20 +249,35 @@ class SettingsViewModel @Inject constructor(
             }
         }
 
-        // Load debug premium override
+        // Resolve premium from RevenueCat with optional debug override.
         viewModelScope.launch {
             combine(
+                purchaseService.subscriptionStatus,
                 preferences.debugPremiumActive,
                 preferences.debugPremiumOverride
-            ) { active, value ->
-                Pair(active, value)
-            }.collect { (active, value) ->
+            ) { subscriptionStatus, active, value ->
+                Triple(subscriptionStatus.isActive, active, value)
+            }.collect { (isActive, active, value) ->
                 _uiState.update {
                     it.copy(
                         debugPremiumOverride = if (active) value else null,
-                        isPremium = if (active) value else false
+                        isPremium = if (active) value else isActive
                     )
                 }
+            }
+        }
+
+        if (!BuildConfig.DEBUG) {
+            _uiState.update {
+                it.copy(
+                    useDebugDefaults = false,
+                    debugPremiumOverride = null,
+                    useDebugUserId = false,
+                    useBypassToken = false,
+                    bypassToken = "",
+                    isAddingDebugCredits = false,
+                    debugCreditsResult = null
+                )
             }
         }
     }
@@ -255,6 +286,7 @@ class SettingsViewModel @Inject constructor(
      * Refresh the current auth config - call when screen becomes visible
      */
     fun refreshAuthConfig() {
+        loadRemoteFlags()
         val currentConfig = authProviderRepository.currentConfig.value
         android.util.Log.d("SettingsViewModel", "refreshAuthConfig: hostingType=${currentConfig.hostingType}, isConfigured=${currentConfig.isConfigured}, isProvisioning=${currentConfig.isProvisioning}, managedInstance=${currentConfig.managedInstance?.tenantId}, firebaseSignedIn=${firebaseAuthService.isSignedIn}, currentUserId=$currentUserId")
         _uiState.update {
@@ -264,8 +296,8 @@ class SettingsViewModel @Inject constructor(
             fetchCredits()
         }
 
-        // If signed in but no local config, check backend for existing tenants
-        if (BuildConfig.IS_WEB2 && firebaseAuthService.isSignedIn && !currentConfig.isConfigured && !currentConfig.isProvisioning) {
+        // If not configured, try restoring existing tenants by current device userId.
+        if (BuildConfig.IS_WEB2 && !currentConfig.isConfigured && !currentConfig.isProvisioning) {
             checkForExistingTenants()
         }
     }
@@ -277,36 +309,21 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSyncing = true) }
 
-            // First call /me to get the correct backend userId
-            android.util.Log.d("SettingsViewModel", "Calling getMe() to get backend userId")
-            controlPlaneService.getMe().fold(
-                onSuccess = { userResponse ->
-                    val backendUserId = userResponse.userId
-                    android.util.Log.d("SettingsViewModel", "Got backend userId: $backendUserId")
-                    preferences.setBackendUserId(backendUserId)
-
-                    // Now fetch tenants with the correct userId
-                    android.util.Log.d("SettingsViewModel", "Checking for existing tenants for userId=$backendUserId")
-                    controlPlaneService.getUserTenants(backendUserId).fold(
-                        onSuccess = { tenants ->
-                            android.util.Log.d("SettingsViewModel", "Found ${tenants.size} existing tenants")
-                            if (tenants.isNotEmpty()) {
-                                val existingTenant = tenants.first()
-                                android.util.Log.d("SettingsViewModel", "Using existing tenant: ${existingTenant.tenantId}, status=${existingTenant.status}")
-                                // Configure local state with existing tenant
-                                authProviderRepository.configureManaged(existingTenant.tenantId)
-                                authProviderRepository.updateManagedInstance(existingTenant)
-                            }
-                            _uiState.update { it.copy(isSyncing = false) }
-                        },
-                        onFailure = { e ->
-                            android.util.Log.e("SettingsViewModel", "Failed to check for existing tenants", e)
-                            _uiState.update { it.copy(isSyncing = false) }
-                        }
-                    )
+            val userId = currentUserId
+            android.util.Log.d("SettingsViewModel", "Checking for existing tenants for userId=$userId")
+            controlPlaneService.getUserTenants(userId).fold(
+                onSuccess = { tenants ->
+                    android.util.Log.d("SettingsViewModel", "Found ${tenants.size} existing tenants")
+                    if (tenants.isNotEmpty()) {
+                        val existingTenant = tenants.first()
+                        android.util.Log.d("SettingsViewModel", "Using existing tenant: ${existingTenant.tenantId}, status=${existingTenant.status}")
+                        authProviderRepository.configureManaged(existingTenant.tenantId)
+                        authProviderRepository.updateManagedInstance(existingTenant)
+                    }
+                    _uiState.update { it.copy(isSyncing = false) }
                 },
                 onFailure = { e ->
-                    android.util.Log.e("SettingsViewModel", "getMe() failed, cannot check tenants", e)
+                    android.util.Log.e("SettingsViewModel", "Failed to check for existing tenants", e)
                     _uiState.update { it.copy(isSyncing = false) }
                 }
             )
@@ -425,6 +442,7 @@ class SettingsViewModel @Inject constructor(
 
     // Debug settings
     fun setUseDebugDefaults(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         viewModelScope.launch {
             preferences.setUseDebugDefaults(enabled)
             _uiState.update { it.copy(useDebugDefaults = enabled) }
@@ -432,6 +450,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setDebugPremiumOverride(value: Boolean?) {
+        if (!BuildConfig.DEBUG) return
         analytics.trackDebugPremiumOverrideChanged(value)
         viewModelScope.launch {
             val active = value != null
@@ -454,6 +473,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setAlwaysShowOnboarding(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         viewModelScope.launch {
             preferences.setAlwaysShowOnboarding(enabled)
             _uiState.update { it.copy(alwaysShowOnboarding = enabled) }
@@ -461,6 +481,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setUseDebugUserId(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         viewModelScope.launch {
             preferences.setUseDebugUserId(enabled)
             _uiState.update { it.copy(useDebugUserId = enabled) }
@@ -468,6 +489,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setUseBypassToken(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         viewModelScope.launch {
             preferences.setUseBypassToken(enabled)
             _uiState.update { it.copy(useBypassToken = enabled) }
@@ -475,6 +497,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setBypassToken(token: String) {
+        if (!BuildConfig.DEBUG) return
         viewModelScope.launch {
             preferences.setBypassToken(token)
             _uiState.update { it.copy(bypassToken = token) }
@@ -663,6 +686,7 @@ class SettingsViewModel @Inject constructor(
      * Adds 1 billion credits (1,000,000,000)
      */
     fun addDebugCredits() {
+        if (!BuildConfig.DEBUG) return
         val bypassToken = _uiState.value.bypassToken
         if (bypassToken.isBlank()) {
             _uiState.update { it.copy(debugCreditsResult = "Error: Bypass token required") }

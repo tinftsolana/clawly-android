@@ -7,6 +7,7 @@ import ai.clawly.app.data.auth.FirebaseAuthState
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
+import ai.clawly.app.data.service.PurchaseService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.revenuecat.purchases.Purchases
@@ -31,7 +32,8 @@ class LoginViewModel @Inject constructor(
     private val firebaseAuthService: FirebaseAuthService,
     private val controlPlaneService: ControlPlaneService,
     private val deviceIdentityManager: DeviceIdentityManager,
-    private val preferences: GatewayPreferences
+    private val preferences: GatewayPreferences,
+    private val purchaseService: PurchaseService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LoginUiState())
@@ -67,23 +69,18 @@ class LoginViewModel @Inject constructor(
                             },
                             onFailure = { e -> Log.e(TAG, "Backend login failed", e) }
                         )
-
-                        // Also call /me to get the actual backend userId
-                        controlPlaneService.getMe().fold(
-                            onSuccess = { userResponse ->
-                                Log.d(TAG, "Got backend user: userId=${userResponse.userId}")
-                                preferences.setBackendUserId(userResponse.userId)
-                            },
-                            onFailure = { e -> Log.e(TAG, "getMe failed", e) }
-                        )
                     }.onFailure { e ->
                         Log.e(TAG, "Failed to get Firebase ID token for backend login", e)
                     }
 
                     // Link RevenueCat
-                    Log.d(TAG, "Linking RevenueCat: ${user.uid}")
+                    val revenueCatUserId = deviceIdentityManager.loadOrCreateIdentity()?.deviceId
+                    Log.d(TAG, "Linking RevenueCat with deviceId: ${revenueCatUserId?.take(12)}...")
                     try {
-                        Purchases.sharedInstance.logIn(user.uid, null)
+                        if (!revenueCatUserId.isNullOrEmpty()) {
+                            Purchases.sharedInstance.logIn(revenueCatUserId, null)
+                        }
+                        purchaseService.checkSubscriptionStatus()
                     } catch (e: Exception) {
                         Log.e(TAG, "RevenueCat logIn failed", e)
                     }

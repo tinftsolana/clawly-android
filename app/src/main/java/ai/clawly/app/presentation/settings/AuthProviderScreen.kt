@@ -42,6 +42,7 @@ fun AuthProviderScreen(
     onNavigateBack: () -> Unit,
     onConfigured: () -> Unit,
     onNavigateToInstanceSetup: () -> Unit,
+    onNavigateToPaywall: () -> Unit,
     viewModel: AuthProviderViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -187,10 +188,14 @@ fun AuthProviderScreen(
                     isRecommended = true,
                     isLoading = uiState.isCreatingInstance,
                     onClick = {
-                        viewModel.createManagedInstance(
-                            onSuccess = { viewModel.showProvisioningView() },
-                            onError = { /* Error handled in ViewModel */ }
-                        )
+                        if (!uiState.hasPremiumAccess) {
+                            onNavigateToPaywall()
+                        } else {
+                            viewModel.createManagedInstance(
+                                onSuccess = { viewModel.showProvisioningView() },
+                                onError = { /* Error handled in ViewModel */ }
+                            )
+                        }
                     }
                 )
 

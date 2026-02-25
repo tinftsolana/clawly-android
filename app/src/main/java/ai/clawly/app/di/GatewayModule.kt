@@ -29,9 +29,10 @@ object GatewayModule {
     @Provides
     @Singleton
     fun provideDeviceIdentityManager(
-        preferences: GatewayPreferences
+        preferences: GatewayPreferences,
+        @ApplicationContext context: Context
     ): DeviceIdentityManager {
-        return DeviceIdentityManager(preferences)
+        return DeviceIdentityManager(preferences, context)
     }
 
     @Provides

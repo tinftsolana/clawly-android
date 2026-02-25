@@ -2,6 +2,8 @@ package ai.clawly.app.presentation.paywall
 
 import android.app.Activity
 import android.util.Log
+import ai.clawly.app.data.remote.ControlPlaneService
+import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.service.ProductInfo
 import ai.clawly.app.data.service.PurchaseService
 import androidx.lifecycle.ViewModel
@@ -45,7 +47,9 @@ data class PaywallUiState(
 
 @HiltViewModel
 class PaywallViewModel @Inject constructor(
-    private val purchaseService: PurchaseService
+    private val purchaseService: PurchaseService,
+    private val controlPlaneService: ControlPlaneService,
+    private val deviceIdentityManager: DeviceIdentityManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PaywallUiState())
@@ -171,6 +175,9 @@ class PaywallViewModel @Inject constructor(
             purchaseService.purchase(activity, product.packageId)
                 .onSuccess { status ->
                     Log.d(TAG, "Purchase successful: isActive=${status.isActive}")
+                    if (status.isActive) {
+                        syncPurchasesToBackend()
+                    }
                     _uiState.update {
                         it.copy(
                             isPurchasing = false,
@@ -199,6 +206,9 @@ class PaywallViewModel @Inject constructor(
             purchaseService.restorePurchases()
                 .onSuccess { status ->
                     Log.d(TAG, "Restore successful: isActive=${status.isActive}")
+                    if (status.isActive) {
+                        syncPurchasesToBackend()
+                    }
                     _uiState.update {
                         it.copy(
                             isRestoring = false,
@@ -223,5 +233,27 @@ class PaywallViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(showError = false, error = null) }
+    }
+
+    private fun syncPurchasesToBackend() {
+        viewModelScope.launch {
+            val userId = resolveSyncUserId()
+            if (userId.isNullOrEmpty()) {
+                Log.w(TAG, "syncPurchases skipped: no userId available")
+                return@launch
+            }
+            controlPlaneService.syncPurchases(userId).fold(
+                onSuccess = { credits ->
+                    Log.d(TAG, "syncPurchases success: credits=$credits")
+                },
+                onFailure = { e ->
+                    Log.e(TAG, "syncPurchases failed", e)
+                }
+            )
+        }
+    }
+
+    private suspend fun resolveSyncUserId(): String? {
+        return deviceIdentityManager.loadOrCreateIdentity()?.deviceId
     }
 }

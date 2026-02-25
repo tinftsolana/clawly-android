@@ -147,7 +147,6 @@ class ControlPlaneService @Inject constructor(
             firebaseAuthService.getIdToken(forceRefresh = false).onSuccess { token ->
                 Log.d(TAG, "AUTH: Using Bearer token (Firebase signed in)")
                 header("Authorization", "Bearer $token")
-                return
             }.onFailure { e ->
                 Log.e(TAG, "AUTH: Firebase signed in but getIdToken FAILED, falling back to X-User-Id", e)
             }
@@ -616,7 +615,9 @@ class ControlPlaneService @Inject constructor(
 
             val response = client.post("$BASE_URL/me/sync-purchases") {
                 contentType(ContentType.Application.Json)
-                addAuthHeaders(userId)
+                header("X-User-Id", userId)
+                // Keep a single X-User-Id value. addAuthHeaders(null) only adds Bearer token when available.
+                addAuthHeaders(null)
                 setBody("{}")
             }
 

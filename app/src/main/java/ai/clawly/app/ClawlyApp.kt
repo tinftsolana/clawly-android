@@ -4,6 +4,9 @@ import ai.clawly.app.BuildConfig
 import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.auth.FirebaseAuthState
 import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.remote.ControlPlaneService
+import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
+import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.navigation.ClawlyNavHost
 import ai.clawly.app.ui.theme.ClawlyColors
 import com.revenuecat.purchases.Purchases
@@ -31,7 +34,10 @@ data class AppUiState(
 @HiltViewModel
 class AppViewModel @Inject constructor(
     private val preferences: GatewayPreferences,
-    private val firebaseAuthService: FirebaseAuthService
+    private val firebaseAuthService: FirebaseAuthService,
+    private val purchaseService: PurchaseService,
+    private val controlPlaneService: ControlPlaneService,
+    private val deviceIdentityManager: DeviceIdentityManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AppUiState())
@@ -55,15 +61,43 @@ class AppViewModel @Inject constructor(
                 isFirebaseSignedIn = signedIn
             )
 
-            // Re-associate RevenueCat on app start if already signed in
-            if (BuildConfig.IS_WEB2 && signedIn) {
-                firebaseAuthService.firebaseUid?.let { uid ->
-                    try {
-                        Purchases.sharedInstance.logIn(uid, null)
-                    } catch (_: Exception) { }
-                }
+            // Always associate RevenueCat with stable deviceId on app start (web2).
+            if (BuildConfig.IS_WEB2) {
+                try {
+                    val deviceId = deviceIdentityManager.loadOrCreateIdentity()?.deviceId
+                    if (!deviceId.isNullOrEmpty()) {
+                        Purchases.sharedInstance.logIn(deviceId, null)
+                        purchaseService.checkSubscriptionStatus()
+                    }
+                } catch (_: Exception) { }
+            }
+
+            if (BuildConfig.IS_WEB2) {
+                syncPurchasesOnStartup()
             }
         }
+    }
+
+    private fun syncPurchasesOnStartup() {
+        viewModelScope.launch {
+            val userId = resolveSyncUserId()
+            if (userId.isNullOrEmpty()) {
+                android.util.Log.w("AppViewModel", "Startup sync-purchases skipped: no userId available")
+                return@launch
+            }
+            controlPlaneService.syncPurchases(userId).fold(
+                onSuccess = { credits ->
+                    android.util.Log.d("AppViewModel", "Startup sync-purchases success: credits=$credits")
+                },
+                onFailure = { e ->
+                    android.util.Log.e("AppViewModel", "Startup sync-purchases failed", e)
+                }
+            )
+        }
+    }
+
+    private suspend fun resolveSyncUserId(): String? {
+        return deviceIdentityManager.loadOrCreateIdentity()?.deviceId
     }
 
     private fun observeFirebaseAuth() {

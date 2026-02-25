@@ -1,5 +1,6 @@
 package ai.clawly.app.data.preferences
 
+import ai.clawly.app.BuildConfig
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -280,16 +281,18 @@ class GatewayPreferences @Inject constructor(
 
     // Use Debug Defaults
     val useDebugDefaults: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_USE_DEBUG_DEFAULTS] ?: false
+        if (BuildConfig.DEBUG) prefs[KEY_USE_DEBUG_DEFAULTS] ?: false else false
     }
 
     suspend fun setUseDebugDefaults(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         dataStore.edit { prefs ->
             prefs[KEY_USE_DEBUG_DEFAULTS] = enabled
         }
     }
 
     suspend fun getUseDebugDefaultsSync(): Boolean {
+        if (!BuildConfig.DEBUG) return false
         return dataStore.data.first()[KEY_USE_DEBUG_DEFAULTS] ?: false
     }
 
@@ -312,7 +315,7 @@ class GatewayPreferences @Inject constructor(
 
         // For self-hosted or no hosting type, use regular gateway URL
         val saved = prefs[KEY_GATEWAY_URL] ?: ""
-        val useDefaults = prefs[KEY_USE_DEBUG_DEFAULTS] ?: false
+        val useDefaults = if (BuildConfig.DEBUG) (prefs[KEY_USE_DEBUG_DEFAULTS] ?: false) else false
         android.util.Log.d("GatewayPreferences", "getEffectiveGatewayUrl: hostingType=$hostingType, saved=$saved, useDefaults=$useDefaults")
 
         if (saved.isNotEmpty()) return saved
@@ -342,7 +345,7 @@ class GatewayPreferences @Inject constructor(
         if (saved.isNotEmpty()) return saved
 
         // Fallback to debug defaults
-        val useDefaults = prefs[KEY_USE_DEBUG_DEFAULTS] ?: false
+        val useDefaults = if (BuildConfig.DEBUG) (prefs[KEY_USE_DEBUG_DEFAULTS] ?: false) else false
         return if (useDefaults) DEFAULT_TOKEN else ""
     }
 
@@ -370,31 +373,35 @@ class GatewayPreferences @Inject constructor(
 
     // Use Debug User ID
     val useDebugUserId: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_USE_DEBUG_USER_ID] ?: false
+        if (BuildConfig.DEBUG) prefs[KEY_USE_DEBUG_USER_ID] ?: false else false
     }
 
     suspend fun setUseDebugUserId(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         dataStore.edit { prefs ->
             prefs[KEY_USE_DEBUG_USER_ID] = enabled
         }
     }
 
     suspend fun getUseDebugUserIdSync(): Boolean {
+        if (!BuildConfig.DEBUG) return false
         return dataStore.data.first()[KEY_USE_DEBUG_USER_ID] ?: false
     }
 
     // Use Bypass Token
     val useBypassToken: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_USE_BYPASS_TOKEN] ?: false
+        if (BuildConfig.DEBUG) prefs[KEY_USE_BYPASS_TOKEN] ?: false else false
     }
 
     suspend fun setUseBypassToken(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
         dataStore.edit { prefs ->
             prefs[KEY_USE_BYPASS_TOKEN] = enabled
         }
     }
 
     suspend fun getUseBypassTokenSync(): Boolean {
+        if (!BuildConfig.DEBUG) return false
         return dataStore.data.first()[KEY_USE_BYPASS_TOKEN] ?: false
     }
 
@@ -404,6 +411,7 @@ class GatewayPreferences @Inject constructor(
     }
 
     suspend fun setBypassToken(token: String) {
+        if (!BuildConfig.DEBUG) return
         dataStore.edit { prefs ->
             prefs[KEY_BYPASS_TOKEN] = token
         }
@@ -430,14 +438,15 @@ class GatewayPreferences @Inject constructor(
 
     // Debug Premium Override - when active, use debugPremiumOverride value
     val debugPremiumActive: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_DEBUG_PREMIUM_ACTIVE] ?: false
+        if (BuildConfig.DEBUG) prefs[KEY_DEBUG_PREMIUM_ACTIVE] ?: false else false
     }
 
     val debugPremiumOverride: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_DEBUG_PREMIUM_OVERRIDE] ?: false
+        if (BuildConfig.DEBUG) prefs[KEY_DEBUG_PREMIUM_OVERRIDE] ?: false else false
     }
 
     suspend fun setDebugPremiumOverride(active: Boolean, value: Boolean) {
+        if (!BuildConfig.DEBUG) return
         dataStore.edit { prefs ->
             prefs[KEY_DEBUG_PREMIUM_ACTIVE] = active
             prefs[KEY_DEBUG_PREMIUM_OVERRIDE] = value
@@ -445,6 +454,7 @@ class GatewayPreferences @Inject constructor(
     }
 
     suspend fun getDebugPremiumSync(): Pair<Boolean, Boolean> {
+        if (!BuildConfig.DEBUG) return Pair(false, false)
         val prefs = dataStore.data.first()
         val active = prefs[KEY_DEBUG_PREMIUM_ACTIVE] ?: false
         val value = prefs[KEY_DEBUG_PREMIUM_OVERRIDE] ?: false

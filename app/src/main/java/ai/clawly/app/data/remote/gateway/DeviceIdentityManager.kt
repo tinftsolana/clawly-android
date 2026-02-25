@@ -1,12 +1,13 @@
 package ai.clawly.app.data.remote.gateway
 
 import ai.clawly.app.data.preferences.GatewayPreferences
+import android.content.Context
 import android.util.Base64
-import kotlinx.coroutines.runBlocking
+import android.provider.Settings
+import dagger.hilt.android.qualifiers.ApplicationContext
 import org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator
 import org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -36,7 +37,8 @@ data class DeviceIdentity(
  */
 @Singleton
 class DeviceIdentityManager @Inject constructor(
-    private val preferences: GatewayPreferences
+    private val preferences: GatewayPreferences,
+    @ApplicationContext private val context: Context
 ) {
     /**
      * Load or create device identity for gateway authentication
@@ -56,15 +58,17 @@ class DeviceIdentityManager @Inject constructor(
                 }
             }
 
-            // Generate new identity
-            val keyPairGenerator = Ed25519KeyPairGenerator()
-            keyPairGenerator.init(Ed25519KeyGenerationParameters(SecureRandom()))
-            val keyPair = keyPairGenerator.generateKeyPair()
-
-            val privateKey = keyPair.private as Ed25519PrivateKeyParameters
-            val publicKey = keyPair.public as Ed25519PublicKeyParameters
-
-            val seed = privateKey.encoded
+            // No saved seed: derive deterministic seed from ANDROID_ID so identity survives reinstall.
+            val seed = deriveSeedFromAndroidId()
+                ?: run {
+                    // Fallback for rare cases where ANDROID_ID is unavailable.
+                    val keyPairGenerator = Ed25519KeyPairGenerator()
+                    keyPairGenerator.init(Ed25519KeyGenerationParameters(SecureRandom()))
+                    val keyPair = keyPairGenerator.generateKeyPair()
+                    (keyPair.private as Ed25519PrivateKeyParameters).encoded
+                }
+            val privateKey = Ed25519PrivateKeyParameters(seed, 0)
+            val publicKey = privateKey.generatePublicKey()
             val publicKeyBytes = publicKey.encoded
             val deviceId = sha256Hex(publicKeyBytes)
 
@@ -137,6 +141,15 @@ class DeviceIdentityManager @Inject constructor(
         val digest = MessageDigest.getInstance("SHA-256")
         val hash = digest.digest(data)
         return hash.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun deriveSeedFromAndroidId(): ByteArray? {
+        val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(androidId.toByteArray(Charsets.UTF_8))
     }
 
     private fun base64UrlEncode(data: ByteArray): String {

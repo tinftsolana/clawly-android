@@ -4,6 +4,7 @@ import ai.clawly.app.BuildConfig
 import ai.clawly.app.analytics.AmplitudeAnalyticsService
 import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.remote.RemoteConfigFlags
 import ai.clawly.app.data.remote.gateway.GatewayService
 import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.manager.SkillsManager
@@ -347,6 +348,7 @@ class ChatViewModel @Inject constructor(
         val state = _uiState.value
 
         Log.d(TAG, "Validating send: hasPremium=${state.hasPremiumAccess}, hasAuthProvider=${state.hasAuthProvider}, isProvisioning=${state.isProvisioning}, isConnected=${state.isConnected}, hostingType=${state.currentAuthProvider.hostingType}, isConfigured=${state.currentAuthProvider.isConfigured}")
+        val selfHostedWithoutPremium = RemoteConfigFlags.isSelfHostedWithoutPremiumEnabled()
 
         // Web3 builds: Check credits and connection
         if (BuildConfig.IS_WEB3) {
@@ -368,12 +370,6 @@ class ChatViewModel @Inject constructor(
         // Web2 flow below
         // Premium users
         if (state.hasPremiumAccess) {
-            // Premium but no auth provider configured -> show config prompt
-            if (!state.hasAuthProvider) {
-                Log.d(TAG, "Validation failed: no auth provider")
-                return SendValidationResult.ShowConfigPrompt
-            }
-
             // Still provisioning -> show config prompt (to show status)
             if (state.isProvisioning) {
                 Log.d(TAG, "Validation failed: still provisioning")
@@ -393,12 +389,24 @@ class ChatViewModel @Inject constructor(
                 }
             }
 
+            if (!state.hasAuthProvider) {
+                Log.w(TAG, "No auth provider in state, but gateway is connected; allowing send")
+            }
             Log.d(TAG, "Validation passed")
             return SendValidationResult.Allowed
         }
 
         // Non-premium users
         // Temporary guest mode for web2: skip login requirement
+        if (selfHostedWithoutPremium && state.currentAuthProvider.hostingType == HostingType.SelfHosted) {
+            if (state.isProvisioning) {
+                return SendValidationResult.ShowConfigPrompt
+            }
+            if (!state.isConnected) {
+                return SendValidationResult.ShowConfigPrompt
+            }
+            return SendValidationResult.Allowed
+        }
 
         // If not connected, show paywall immediately
         if (!state.isConnected) {

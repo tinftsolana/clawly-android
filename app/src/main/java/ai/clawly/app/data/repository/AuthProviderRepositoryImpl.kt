@@ -1,7 +1,6 @@
 package ai.clawly.app.data.repository
 
 import ai.clawly.app.BuildConfig
-import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
@@ -32,8 +31,7 @@ class AuthProviderRepositoryImpl @Inject constructor(
     private val controlPlaneService: ControlPlaneService,
     private val gatewayService: GatewayService,
     private val deviceIdentityManager: DeviceIdentityManager,
-    private val walletRepository: WalletRepository,
-    private val firebaseAuthService: FirebaseAuthService
+    private val walletRepository: WalletRepository
 ) : AuthProviderRepository {
 
     private val _currentConfig = MutableStateFlow(AuthProviderConfig.empty())
@@ -52,7 +50,7 @@ class AuthProviderRepositoryImpl @Inject constructor(
     /**
      * Get current user ID
      * - Web3 builds: Uses wallet address (publicKey)
-     * - Web2 builds: Uses Firebase UID when signed in, device identity fallback
+     * - Web2 builds: Uses stable device identity
      */
     val currentUserId: String
         get() {
@@ -72,19 +70,7 @@ class AuthProviderRepositoryImpl @Inject constructor(
                 Log.w(TAG, "Web3 build but wallet not connected, falling back to device identity")
             }
 
-            // Web2 builds: Prefer backend userId (from POST /auth/login), then Firebase UID
-            if (BuildConfig.IS_WEB2) {
-                val backendUserId = runBlocking { preferences.getBackendUserIdSync() }
-                if (!backendUserId.isNullOrEmpty()) {
-                    return backendUserId
-                }
-                val firebaseUid = firebaseAuthService.firebaseUid
-                if (firebaseUid != null) {
-                    return firebaseUid
-                }
-            }
-
-            // Fallback: Use device identity
+            // Web2 + fallback: use stable device identity
             val identity = runBlocking { deviceIdentityManager.loadOrCreateIdentity() }
             return identity?.deviceId ?: "android-${System.currentTimeMillis()}"
         }

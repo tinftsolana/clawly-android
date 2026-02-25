@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -179,6 +180,14 @@ fun ClawlyNavHost(
             val context = LocalContext.current
             val activity = context as? Activity
 
+            LaunchedEffect(uiState.purchaseCompleted) {
+                if (uiState.purchaseCompleted) {
+                    navController.navigate(ChatRoute) {
+                        popUpTo(PaywallRoute) { inclusive = true }
+                    }
+                }
+            }
+
             PaywallScreen(
                 monthlyPrice = uiState.monthlyPrice,
                 yearlyPrice = uiState.yearlyPrice,
@@ -238,6 +247,13 @@ fun ClawlyNavHost(
                     // Managed hosting is ready, navigate to instance setup
                     navController.navigate(InstanceSetupRoute) {
                         // Don't pop auth provider so user can go back
+                    }
+                },
+                onNavigateToPaywall = {
+                    if (BuildConfig.IS_WEB3) {
+                        navController.navigate(Web3PaywallRoute)
+                    } else {
+                        navController.navigate(PaywallRoute)
                     }
                 }
             )
