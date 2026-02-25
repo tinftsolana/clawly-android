@@ -18,6 +18,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -80,6 +81,14 @@ data class ProviderAuthResponse(
     val provider: String? = null
 )
 
+@Serializable
+data class PairingDevicesResponse(
+    val ok: Boolean,
+    val pairingType: String? = null,
+    val method: String? = null,
+    val pairing: JsonElement? = null
+)
+
 /**
  * Service for interacting with the control plane API
  * Matches iOS ControlPlaneService.swift exactly
@@ -129,9 +138,11 @@ class ControlPlaneService @Inject constructor(
     }
 
     /**
-     * Add auth headers: Firebase Bearer token for web2 signed-in users, X-User-Id fallback otherwise
+     * Add auth headers:
+     * - Firebase Bearer token for signed-in web2 users
+     * - X-User-Id fallback for user-scoped requests
      */
-    private suspend fun HttpRequestBuilder.addAuthHeaders(userId: String) {
+    private suspend fun HttpRequestBuilder.addAuthHeaders(userId: String?) {
         if (BuildConfig.IS_WEB2 && firebaseAuthService.isSignedIn) {
             firebaseAuthService.getIdToken(forceRefresh = false).onSuccess { token ->
                 Log.d(TAG, "AUTH: Using Bearer token (Firebase signed in)")
@@ -143,8 +154,12 @@ class ControlPlaneService @Inject constructor(
         } else {
             Log.d(TAG, "AUTH: Firebase not signed in (isWeb2=${BuildConfig.IS_WEB2}, isSignedIn=${firebaseAuthService.isSignedIn})")
         }
-        Log.d(TAG, "AUTH: Using X-User-Id=$userId")
-        header("X-User-Id", userId)
+        if (!userId.isNullOrBlank()) {
+            Log.d(TAG, "AUTH: Using X-User-Id=$userId")
+            header("X-User-Id", userId)
+        } else {
+            Log.w(TAG, "AUTH: No Firebase token and no X-User-Id available")
+        }
     }
 
     // MARK: - Auth
@@ -657,12 +672,14 @@ class ControlPlaneService @Inject constructor(
      * Approve a device pairing request
      * POST /instances/:tenantId/pairing/devices/:requestId/approve
      */
-    suspend fun approvePairing(tenantId: String, requestId: String): Result<Unit> {
+    suspend fun approvePairing(tenantId: String, requestId: String, userId: String? = null): Result<Unit> {
         return try {
             Log.d(TAG, "Approving pairing request: $requestId for tenant: $tenantId")
 
             val response = client.post("$BASE_URL/instances/$tenantId/pairing/devices/$requestId/approve") {
                 contentType(ContentType.Application.Json)
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
                 setBody("{}")
             }
 
@@ -676,6 +693,34 @@ class ControlPlaneService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Pairing approval error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get current pairing state (pending + approved devices)
+     * GET /instances/:tenantId/pairing/devices
+     */
+    suspend fun getPairingDevices(tenantId: String, userId: String? = null): Result<PairingDevicesResponse> {
+        return try {
+            Log.d(TAG, "Fetching pairing devices for tenant: $tenantId")
+
+            val response = client.get("$BASE_URL/instances/$tenantId/pairing/devices") {
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
+            }
+
+            if (response.status.isSuccess()) {
+                val result = response.body<PairingDevicesResponse>()
+                Log.d(TAG, "Pairing devices fetched: method=${result.method}, hasPairing=${result.pairing != null}")
+                Result.success(result)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Get pairing devices failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get pairing devices error", e)
             Result.failure(e)
         }
     }

@@ -37,6 +37,7 @@ data class ProductInfo(
     val priceAmountMicros: Long,
     val title: String,
     val description: String,
+    val subscriptionPeriod: String?,
     val isMonthly: Boolean
 )
 
@@ -95,6 +96,14 @@ class PurchaseService @Inject constructor() {
                     try {
                         val product = pkg.product
                         val price = product.price
+                        val subscriptionPeriod = product.period?.iso8601?.uppercase()
+                        val isMonthly = when (subscriptionPeriod) {
+                            "P1M" -> true
+                            "P1Y" -> false
+                            else -> pkg.identifier.contains("month", ignoreCase = true) ||
+                                    product.id.contains("month", ignoreCase = true)
+                        }
+
                         ProductInfo(
                             packageId = pkg.identifier,
                             productId = product.id,
@@ -102,8 +111,8 @@ class PurchaseService @Inject constructor() {
                             priceAmountMicros = price.amountMicros,
                             title = product.title,
                             description = product.description,
-                            isMonthly = pkg.identifier.contains("month", ignoreCase = true) ||
-                                    product.id.contains("month", ignoreCase = true)
+                            subscriptionPeriod = subscriptionPeriod,
+                            isMonthly = isMonthly
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Error parsing package: ${e.message}")

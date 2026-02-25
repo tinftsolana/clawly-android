@@ -32,4 +32,10 @@ interface AuthProviderRepository {
 
     /** Set the selected AI provider (for managed hosting) */
     suspend fun setSelectedAiProvider(provider: String)
+
+    /**
+     * Fallback pairing recovery: list pending pairing requests and auto-approve the first pending one.
+     * Returns true when approval call was attempted.
+     */
+    suspend fun tryApprovePendingPairingFromList(source: String, reconnectAfterApproval: Boolean = true): Boolean
 }

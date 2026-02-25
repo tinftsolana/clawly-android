@@ -12,6 +12,11 @@ import ai.clawly.app.domain.repository.WalletRepository
 import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -89,6 +94,7 @@ class AuthProviderRepositoryImpl @Inject constructor(
         scope.launch {
             loadSavedConfig()
         }
+        setupPairingSubscription()
     }
 
     private suspend fun loadSavedConfig() {
@@ -136,6 +142,207 @@ class AuthProviderRepositoryImpl @Inject constructor(
         }
 
         _currentConfig.value = config
+        if (config.hostingType == HostingType.Managed) {
+            enforceManagedSessionKey()
+        }
+    }
+
+    private fun setupPairingSubscription() {
+        scope.launch {
+            gatewayService.pairingRequired.collect { requestId ->
+                launch {
+                    autoApprovePairing(
+                        requestId = requestId,
+                        source = "pairingRequired",
+                        reconnectAfterApproval = true
+                    )
+                }
+            }
+        }
+
+        scope.launch {
+            gatewayService.pairingRequested.collect { requestId ->
+                // pairingRequested usually comes from another device/session:
+                // auto-approve but do not force reconnect.
+                launch {
+                    autoApprovePairing(
+                        requestId = requestId,
+                        source = "pairingRequested",
+                        reconnectAfterApproval = false
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun autoApprovePairing(
+        requestId: String,
+        source: String,
+        reconnectAfterApproval: Boolean,
+        attempt: Int = 0
+    ) {
+        val config = _currentConfig.value
+        val effectiveHostingType = if (config.hostingType != null) {
+            config.hostingType
+        } else {
+            HostingType.fromString(preferences.getHostingTypeSync())
+        }
+        val tenantId = config.managedInstance?.tenantId ?: preferences.getTenantIdSync()
+        val initialRequestId = requestId.trim()
+        Log.d(
+            TAG,
+            "$source received, requestId=$initialRequestId, hostingType=$effectiveHostingType, tenantId=$tenantId, attempt=$attempt"
+        )
+
+        if (effectiveHostingType != HostingType.Managed || tenantId.isNullOrEmpty()) {
+            Log.d(TAG, "Skipping $source auto-approve: not managed or tenantId missing")
+            return
+        }
+
+        var requestIdToApprove = initialRequestId
+        if (requestIdToApprove.isEmpty()) {
+            requestIdToApprove = resolvePendingPairingRequestIdFromList(tenantId, source) ?: ""
+        }
+        if (requestIdToApprove.isEmpty()) {
+            Log.w(TAG, "No pending pairing requestId found for $source, skipping approve")
+            if (reconnectAfterApproval) {
+                reconnectGatewayForManaged()
+            }
+            return
+        }
+
+        Log.d(TAG, "Auto-approving device pairing, requestId=$requestIdToApprove, source=$source")
+        val result = controlPlaneService.approvePairing(
+            tenantId = tenantId,
+            requestId = requestIdToApprove,
+            userId = currentUserId
+        )
+        if (result.isSuccess) {
+            Log.d(TAG, "Pairing approved ($source)")
+            if (reconnectAfterApproval) {
+                reconnectGatewayForManaged()
+            }
+            return
+        }
+
+        val error = result.exceptionOrNull()
+        val errorText = (error?.message ?: error.toString()).lowercase()
+        val willRetry = attempt < 2 && errorText.contains("gateway_ws_open_timeout")
+        Log.e(TAG, "Pairing approval failed ($source): $errorText")
+
+        if (willRetry) {
+            val nextAttempt = attempt + 1
+            val delayMs = (1.2 * nextAttempt * 1000).toLong()
+            Log.d(TAG, "Retrying pairing approve in ${delayMs}ms ($source, attempt $nextAttempt)")
+            delay(delayMs)
+            autoApprovePairing(
+                requestId = requestIdToApprove,
+                source = "$source:retry",
+                reconnectAfterApproval = reconnectAfterApproval,
+                attempt = nextAttempt
+            )
+            return
+        }
+
+        if (reconnectAfterApproval) {
+            reconnectGatewayForManaged()
+        }
+    }
+
+    override suspend fun tryApprovePendingPairingFromList(source: String, reconnectAfterApproval: Boolean): Boolean {
+        val config = _currentConfig.value
+        val effectiveHostingType = if (config.hostingType != null) {
+            config.hostingType
+        } else {
+            HostingType.fromString(preferences.getHostingTypeSync())
+        }
+        val tenantId = config.managedInstance?.tenantId ?: preferences.getTenantIdSync()
+
+        if (effectiveHostingType != HostingType.Managed || tenantId.isNullOrEmpty()) {
+            Log.d(TAG, "Skipping $source list-based approve: not managed or tenantId missing")
+            return false
+        }
+
+        val requestId = resolvePendingPairingRequestIdFromList(tenantId, source) ?: return false
+        autoApprovePairing(
+            requestId = requestId,
+            source = "$source:list",
+            reconnectAfterApproval = reconnectAfterApproval
+        )
+        return true
+    }
+
+    private suspend fun resolvePendingPairingRequestIdFromList(tenantId: String, source: String): String? {
+        val listResult = controlPlaneService.getPairingDevices(
+            tenantId = tenantId,
+            userId = currentUserId
+        )
+        if (listResult.isFailure) {
+            Log.e(TAG, "Failed to fetch pairing list for $source", listResult.exceptionOrNull())
+            return null
+        }
+
+        val pairingPayload = listResult.getOrNull()?.pairing
+        val resolved = extractPendingRequestId(pairingPayload)
+        if (resolved.isNullOrEmpty()) {
+            Log.d(TAG, "Pairing list has no pending requestId for $source")
+            return null
+        }
+
+        Log.d(TAG, "Resolved pending requestId from list: $resolved ($source)")
+        return resolved
+    }
+
+    private fun extractPendingRequestId(pairingPayload: JsonElement?): String? {
+        if (pairingPayload == null) return null
+
+        val pendingCandidates = when (pairingPayload) {
+            is JsonObject -> sequenceOf(
+                pairingPayload["pending"],
+                pairingPayload["requests"],
+                pairingPayload["devices"]
+            )
+            is JsonArray -> sequenceOf(pairingPayload)
+            else -> emptySequence()
+        }
+
+        for (candidate in pendingCandidates) {
+            val requestId = extractPendingRequestIdFromArray(candidate)
+            if (!requestId.isNullOrEmpty()) return requestId
+        }
+        return null
+    }
+
+    private fun extractPendingRequestIdFromArray(element: JsonElement?): String? {
+        val entries = element as? JsonArray ?: return null
+        val pendingStates = setOf("pending", "requested", "awaiting_approval")
+
+        return entries.firstNotNullOfOrNull { item ->
+            val obj = item as? JsonObject ?: return@firstNotNullOfOrNull null
+            val status = obj["status"]?.jsonPrimitive?.contentOrNull?.lowercase()
+            val state = obj["state"]?.jsonPrimitive?.contentOrNull?.lowercase()
+            if (status != null && status !in pendingStates) return@firstNotNullOfOrNull null
+            if (state != null && state !in pendingStates) return@firstNotNullOfOrNull null
+
+            obj["requestId"]?.jsonPrimitive?.contentOrNull
+                ?: obj["id"]?.jsonPrimitive?.contentOrNull
+        }
+    }
+
+    private suspend fun enforceManagedSessionKey() {
+        val config = _currentConfig.value
+        if (config.hostingType != HostingType.Managed) return
+
+        val targetKey = preferences.getOrCreateManagedSessionKey()
+        val currentKey = preferences.getSessionKeySync().trim()
+        if (currentKey == targetKey) return
+
+        preferences.setSessionKey(targetKey)
+        Log.d(TAG, "Enforced managed session key: $targetKey")
+    }
+
+    private suspend fun reconnectGatewayForManaged() {
+        gatewayService.reconnect()
     }
 
     /**
@@ -270,6 +477,7 @@ class AuthProviderRepositoryImpl @Inject constructor(
         _currentConfig.value = AuthProviderConfig.managed(
             ManagedInstanceInfo(tenantId, ManagedInstanceStatus.Queued)
         )
+        enforceManagedSessionKey()
     }
 
     override suspend fun updateManagedInstance(info: ManagedInstanceInfo) {
@@ -282,6 +490,7 @@ class AuthProviderRepositoryImpl @Inject constructor(
 
         // Update config
         _currentConfig.value = AuthProviderConfig.managed(info)
+        enforceManagedSessionKey()
 
         // If ready and has gateway URL, auto-activate OpenClaw proxy and connect
         if (info.isReady && !info.gatewayUrl.isNullOrEmpty()) {
@@ -325,6 +534,8 @@ class AuthProviderRepositoryImpl @Inject constructor(
         preferences.clearSelfHostedInfo()
         preferences.clearManagedInfo()
         preferences.setSelectedAiProvider(null)
+        preferences.setSessionKey(GatewayPreferences.DEFAULT_SESSION_KEY)
+        preferences.clearManagedSessionKey()
 
         _currentConfig.value = AuthProviderConfig.empty()
 

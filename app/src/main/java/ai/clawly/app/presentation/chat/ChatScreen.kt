@@ -1,5 +1,6 @@
 package ai.clawly.app.presentation.chat
 
+import ai.clawly.app.BuildConfig
 import ai.clawly.app.presentation.chat.components.*
 import ai.clawly.app.ui.theme.ClawlyColors
 import android.Manifest
@@ -49,6 +50,7 @@ fun ChatScreen(
     val context = LocalContext.current
 
     var inputText by remember { mutableStateOf("") }
+    var showGatewayResolvingAlert by remember { mutableStateOf(false) }
 
     // Voice recording state
     var wantsRecording by remember { mutableStateOf(false) }
@@ -239,6 +241,9 @@ fun ChatScreen(
                     onNavigateToSettings()
                 }
                 is ChatEvent.ShowProviderSetup -> onNavigateToProviderSetup()
+                is ChatEvent.ShowGatewayResolvingAlert -> {
+                    showGatewayResolvingAlert = true
+                }
                 is ChatEvent.ShowError -> {
                     android.widget.Toast.makeText(context, "Error: ${event.message}", android.widget.Toast.LENGTH_SHORT).show()
                 }
@@ -339,6 +344,23 @@ fun ChatScreen(
                 )
             }
 
+            if (uiState.isResolvingGatewayAccess) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = topBarHeight + 12.dp, start = 16.dp, end = 16.dp),
+                    color = Color(0xFFFF9500).copy(alpha = 0.16f),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text(
+                        text = "Pairing in progress. Reconnecting...",
+                        color = Color(0xFFFFC15E),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
             // Error snackbar
             if (uiState.showError && uiState.error != null) {
                 Snackbar(
@@ -379,6 +401,8 @@ fun ChatScreen(
             ChatNavBar(
                 connectionStatus = uiState.connectionStatus,
                 onSettingsClick = onNavigateToSettings,
+                showPremiumCrown = BuildConfig.IS_WEB2 && !uiState.hasPremiumAccess,
+                onPremiumClick = onNavigateToPaywall,
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -420,12 +444,27 @@ fun ChatScreen(
                 isAssistantTyping = uiState.isAssistantTyping,
                 isAborting = uiState.isAborting,
                 pendingAttachments = uiState.pendingAttachments,
-                enabled = uiState.isConnected,
+                enabled = uiState.isConnected && !uiState.isResolvingGatewayAccess,
                 onMicClick = toggleRecording,
                 isRecording = uiState.isRecording,
                 rmsLevel = uiState.recordingRmsLevel,
                 modifier = Modifier.navigationBarsPadding()
             )
         }
+    }
+
+    if (showGatewayResolvingAlert) {
+        AlertDialog(
+            onDismissRequest = { showGatewayResolvingAlert = false },
+            confirmButton = {
+                TextButton(onClick = { showGatewayResolvingAlert = false }) {
+                    Text("OK")
+                }
+            },
+            title = { Text("Resolving Access") },
+            text = {
+                Text("Gateway access is still being resolved. Please wait a few seconds, then send again.")
+            }
+        )
     }
 }

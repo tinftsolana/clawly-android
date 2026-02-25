@@ -8,6 +8,7 @@ sealed class ChatEvent {
     data object ShowLogin : ChatEvent()
     data object ShowConfigPrompt : ChatEvent()
     data object ShowProviderSetup : ChatEvent()
+    data object ShowGatewayResolvingAlert : ChatEvent()
     data class ShowError(val message: String) : ChatEvent()
     data object ScrollToBottom : ChatEvent()
     data object MessageSent : ChatEvent()
