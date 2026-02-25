@@ -109,14 +109,16 @@ class PaywallViewModel @Inject constructor(
     }
 
     private fun mapToSubscriptionProduct(productInfo: ProductInfo): SubscriptionProduct {
-        val isMonthly = productInfo.isMonthly ||
-                productInfo.packageId.contains("month", ignoreCase = true) ||
-                productInfo.productId.contains("month", ignoreCase = true)
+        val subscriptionType = when (productInfo.subscriptionPeriod?.uppercase()) {
+            "P1M" -> SubscriptionType.Monthly
+            "P1Y" -> SubscriptionType.Yearly
+            else -> if (productInfo.isMonthly) SubscriptionType.Monthly else SubscriptionType.Yearly
+        }
 
         return SubscriptionProduct(
             id = productInfo.productId,
             packageId = productInfo.packageId,
-            type = if (isMonthly) SubscriptionType.Monthly else SubscriptionType.Yearly,
+            type = subscriptionType,
             price = productInfo.priceAmountMicros / 1_000_000.0,
             localizedPrice = productInfo.price,
             title = productInfo.title,

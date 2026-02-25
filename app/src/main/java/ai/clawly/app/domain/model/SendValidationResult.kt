@@ -18,4 +18,7 @@ sealed class SendValidationResult {
 
     /** Premium user with managed hosting but no AI provider connected - show provider setup */
     data object ShowProviderSetup : SendValidationResult()
+
+    /** Managed hosting is resolving pairing/access and should reconnect before sending */
+    data object GatewayReconnecting : SendValidationResult()
 }

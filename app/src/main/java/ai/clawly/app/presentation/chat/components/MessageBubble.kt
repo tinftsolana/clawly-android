@@ -24,7 +24,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.jeziellago.compose.markdowntext.MarkdownText
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -192,30 +191,21 @@ private fun AttachmentPreview(
 }
 
 /**
- * Markdown content renderer for assistant messages
- * Uses jeziellago/compose-markdown library
+ * Assistant content renderer.
+ * Uses plain Compose Text to avoid AppCompat widget requirements from markdown library.
  */
 @Composable
 fun MarkdownContent(
     content: String,
     modifier: Modifier = Modifier
 ) {
-    MarkdownText(
-        markdown = content,
+    Text(
+        text = content,
         modifier = modifier,
         style = TextStyle(
             color = ClawlyColors.textPrimary,
             fontSize = 15.sp,
             lineHeight = 22.sp
-        ),
-        linkColor = ClawlyColors.accentPrimary,
-        // Code block styling (applies to both inline and block code)
-        syntaxHighlightColor = ClawlyColors.codeBackground,
-        syntaxHighlightTextColor = ClawlyColors.codeText,
-        // Heading separator color
-        headingBreakColor = ClawlyColors.surfaceBorder,
-        // Other options
-        isTextSelectable = true,
-        disableLinkMovementMethod = false
+        )
     )
 }

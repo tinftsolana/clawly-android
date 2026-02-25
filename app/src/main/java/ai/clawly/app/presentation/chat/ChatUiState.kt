@@ -14,6 +14,7 @@ data class ChatUiState(
     val isAborting: Boolean = false,
     val hasPremiumAccess: Boolean = false,
     val currentAuthProvider: AuthProviderConfig = AuthProviderConfig.empty(),
+    val isResolvingGatewayAccess: Boolean = false,
     val error: String? = null,
     val showError: Boolean = false,
     val showConfigPrompt: Boolean = false,

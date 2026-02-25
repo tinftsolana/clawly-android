@@ -5,6 +5,7 @@ import ai.clawly.app.analytics.AmplitudeAnalyticsService
 import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.gateway.GatewayService
+import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.manager.SkillsManager
 import ai.clawly.app.domain.model.*
 import ai.clawly.app.domain.repository.AuthProviderRepository
@@ -23,6 +24,8 @@ import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 
 private const val TAG = "ChatViewModel"
+private const val PAIRING_WARMUP_WINDOW_MS = 20_000L
+private const val PAIRING_ALERT_COOLDOWN_MS = 8_000L
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -36,6 +39,7 @@ class ChatViewModel @Inject constructor(
     private val web3CreditsUseCase: Web3CreditsUseCase,
     private val gatewayConnectionUseCase: GatewayConnectionUseCase,
     private val firebaseAuthService: FirebaseAuthService,
+    private val purchaseService: PurchaseService,
     private val pendingMessageHolder: PendingMessageHolder
 ) : ViewModel() {
 
@@ -51,6 +55,8 @@ class ChatViewModel @Inject constructor(
     // Last user message for retry
     private var lastUserMessage: String? = null
     private var hasLoadedHistory = false
+    private var pairingWarmupUntilMs: Long? = null
+    private var lastPairingAlertAtMs: Long? = null
 
     val assistantName = "Clawly"
 
@@ -118,8 +124,37 @@ class ChatViewModel @Inject constructor(
         // Observe connection status from shared singleton
         viewModelScope.launch {
             gatewayConnectionUseCase.connectionStatus.collect { status ->
+                val now = System.currentTimeMillis()
                 val wasOffline = _uiState.value.connectionStatus != ConnectionStatus.Online
-                _uiState.update { it.copy(connectionStatus = status) }
+                val currentHostingType = _uiState.value.currentAuthProvider.hostingType
+                val isManaged = currentHostingType == HostingType.Managed
+                val shouldResolveGatewayAccess = when (status) {
+                    is ConnectionStatus.Connecting -> {
+                        isManaged && (pairingWarmupUntilMs?.let { it > now } == true)
+                    }
+                    is ConnectionStatus.Error -> {
+                        val lower = status.message.lowercase()
+                        val pairingRelated = lower.contains("pairing required") || lower.contains("not paired")
+                        if (isManaged && pairingRelated) {
+                            pairingWarmupUntilMs = now + PAIRING_WARMUP_WINDOW_MS
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    is ConnectionStatus.Online -> {
+                        pairingWarmupUntilMs = null
+                        false
+                    }
+                    is ConnectionStatus.Offline -> false
+                }
+
+                _uiState.update {
+                    it.copy(
+                        connectionStatus = status,
+                        isResolvingGatewayAccess = shouldResolveGatewayAccess
+                    )
+                }
                 when (status) {
                     is ConnectionStatus.Online -> Log.d(TAG, "Connection status: Online")
                     is ConnectionStatus.Connecting -> Log.d(TAG, "Connection status: Connecting")
@@ -151,19 +186,33 @@ class ChatViewModel @Inject constructor(
         // Observe auth provider changes
         viewModelScope.launch {
             authProviderRepository.currentConfig.collect { config ->
-                _uiState.update { it.copy(currentAuthProvider = config) }
+                _uiState.update {
+                    it.copy(
+                        currentAuthProvider = config,
+                        isResolvingGatewayAccess = if (config.hostingType == HostingType.Managed) {
+                            it.isResolvingGatewayAccess
+                        } else {
+                            false
+                        }
+                    )
+                }
+                if (config.hostingType != HostingType.Managed) {
+                    pairingWarmupUntilMs = null
+                    lastPairingAlertAtMs = null
+                }
             }
         }
 
-        // Observe debug premium override
+        // Resolve premium from RevenueCat subscription + optional debug override
         viewModelScope.launch {
             combine(
+                purchaseService.subscriptionStatus,
                 preferences.debugPremiumActive,
                 preferences.debugPremiumOverride
-            ) { active, premiumValue ->
-                if (active) premiumValue else false
+            ) { subscriptionStatus, debugActive, debugValue ->
+                if (debugActive) debugValue else subscriptionStatus.isActive
             }.collect { hasPremium ->
-                Log.d(TAG, "Debug premium override: $hasPremium")
+                Log.d(TAG, "Premium access updated: $hasPremium")
                 _uiState.update { it.copy(hasPremiumAccess = hasPremium) }
             }
         }
@@ -335,9 +384,13 @@ class ChatViewModel @Inject constructor(
             // The old check for aiProvider is removed since we auto-configure OpenClaw on instance ready
 
             // Not connected to gateway -> show config prompt
-            if (!state.isConnected) {
+            if (!state.isConnected || state.isResolvingGatewayAccess) {
                 Log.d(TAG, "Validation failed: not connected")
-                return SendValidationResult.ShowConfigPrompt
+                return if (state.currentAuthProvider.hostingType == HostingType.Managed) {
+                    SendValidationResult.GatewayReconnecting
+                } else {
+                    SendValidationResult.ShowConfigPrompt
+                }
             }
 
             Log.d(TAG, "Validation passed")
@@ -345,11 +398,7 @@ class ChatViewModel @Inject constructor(
         }
 
         // Non-premium users
-        // Web2: if not signed in, prompt login first
-        if (BuildConfig.IS_WEB2 && !firebaseAuthService.isSignedIn) {
-            Log.d(TAG, "Validation failed: web2 user not signed in")
-            return SendValidationResult.ShowLogin
-        }
+        // Temporary guest mode for web2: skip login requirement
 
         // If not connected, show paywall immediately
         if (!state.isConnected) {
@@ -400,6 +449,13 @@ class ChatViewModel @Inject constructor(
                 viewModelScope.launch { _events.emit(ChatEvent.ShowProviderSetup) }
                 return
             }
+            SendValidationResult.GatewayReconnecting -> {
+                viewModelScope.launch {
+                    _events.emit(ChatEvent.ShowGatewayResolvingAlert)
+                    gatewayConnectionUseCase.reconnect()
+                }
+                return
+            }
         }
 
         // Deduct credit for web3 builds
@@ -427,6 +483,7 @@ class ChatViewModel @Inject constructor(
                 messages = updatedMessages,
                 isAssistantTyping = true,
                 streamingContent = "",
+                isResolvingGatewayAccess = false,
                 pendingAttachments = emptyList()
             )
         }
@@ -477,6 +534,7 @@ class ChatViewModel @Inject constructor(
                 messages = updatedMessages,
                 isAssistantTyping = false,
                 streamingContent = "",
+                isResolvingGatewayAccess = false,
                 error = error.message,
                 showError = true
             )
@@ -497,6 +555,8 @@ class ChatViewModel @Inject constructor(
             Log.d(TAG, "Received non-content message: ${message.type}")
             return
         }
+
+        maybeShowPairingResolvingPrompt(content)
 
         analytics.trackChatMessageReceived(type = message.type)
 
@@ -595,6 +655,63 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.clearMessages()
         }
+    }
+
+    private fun hasPairingSignalInAssistantText(text: String): Boolean {
+        val lower = text.lowercase()
+        return lower.contains("pairing required")
+                || lower.contains("not paired")
+                || lower.contains("gateway isn't paired")
+                || lower.contains("gateway isn’t paired")
+    }
+
+    private suspend fun maybeShowPairingResolvingPrompt(text: String) {
+        val state = _uiState.value
+        if (state.currentAuthProvider.hostingType != HostingType.Managed) return
+        if (!hasPairingSignalInAssistantText(text)) return
+
+        val now = System.currentTimeMillis()
+        val lastShown = lastPairingAlertAtMs
+        if (lastShown != null && now - lastShown < PAIRING_ALERT_COOLDOWN_MS) {
+            return
+        }
+
+        lastPairingAlertAtMs = now
+        pairingWarmupUntilMs = now + PAIRING_WARMUP_WINDOW_MS
+        _uiState.update { it.copy(isResolvingGatewayAccess = true) }
+        analytics.track("pairing_resolving_shown")
+
+        val attempted = authProviderRepository.tryApprovePendingPairingFromList(
+            source = "pairing_resolving_shown",
+            reconnectAfterApproval = true
+        )
+        Log.d(TAG, "List-based pairing approve attempted: $attempted")
+        if (!attempted) {
+            val switched = maybeSwitchToDeviceScopedSessionKey()
+            Log.d(TAG, "Pairing list empty, switched session key for recovery: $switched")
+        }
+
+        _events.emit(ChatEvent.ShowGatewayResolvingAlert)
+        gatewayConnectionUseCase.reconnect()
+    }
+
+    private suspend fun maybeSwitchToDeviceScopedSessionKey(): Boolean {
+        val currentSessionKey = preferences.getSessionKeySync().trim()
+        if (currentSessionKey.isNotEmpty() && currentSessionKey != GatewayPreferences.DEFAULT_SESSION_KEY) {
+            return false
+        }
+
+        val instanceId = preferences.getOrCreateInstanceId()
+        val suffix = instanceId.replace("-", "").takeLast(12).ifEmpty {
+            System.currentTimeMillis().toString(16)
+        }
+        val nextSessionKey = "agent:main:android-$suffix"
+        if (currentSessionKey == nextSessionKey) return false
+
+        preferences.setSessionKey(nextSessionKey)
+        hasLoadedHistory = false
+        Log.d(TAG, "Session key switched for managed pairing recovery: $nextSessionKey")
+        return true
     }
 
     fun dismissError() {

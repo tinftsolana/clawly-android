@@ -21,6 +21,7 @@ import kotlinx.serialization.json.*
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -88,8 +89,9 @@ class GatewayServiceImpl @Inject constructor(
     private val connectMutex = Mutex()
 
     // Guard to prevent double-scheduling reconnects (receive error + connection error race)
-    @Volatile
-    private var reconnectScheduled = false
+    private val reconnectScheduled = AtomicBoolean(false)
+    // Suppress automatic reconnect while we intentionally disconnect/reconnect manually.
+    private val suppressAutoReconnect = AtomicBoolean(false)
 
     // State
     private val _connectionStatus = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline)
@@ -100,6 +102,12 @@ class GatewayServiceImpl @Inject constructor(
 
     private val _streamingState = MutableStateFlow<StreamingState>(StreamingState.Idle)
     override val streamingState: StateFlow<StreamingState> = _streamingState.asStateFlow()
+
+    private val _pairingRequired = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    override val pairingRequired: Flow<String> = _pairingRequired.asSharedFlow()
+
+    private val _pairingRequested = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    override val pairingRequested: Flow<String> = _pairingRequested.asSharedFlow()
 
     private data class PendingRequest(
         val resolve: (JsonObject?) -> Unit,
@@ -122,6 +130,7 @@ class GatewayServiceImpl @Inject constructor(
     private var connectAuthMode = ConnectAuthMode.TokenOnly
     private var lastTokenSource = TokenSource.None
     private var didRetryAfterTokenMismatch = false
+    private var awaitingPairingApproval = false
 
     override suspend fun connect() {
         // Mutex prevents concurrent connect() calls (init + onStart race, watchdog overlap, etc.)
@@ -133,6 +142,7 @@ class GatewayServiceImpl @Inject constructor(
     private suspend fun connectInternal() {
         val current = _connectionStatus.value
         Log.d(TAG, "connect() called, current status: $current")
+        suppressAutoReconnect.set(false)
 
         val gatewayUrl = preferences.getEffectiveGatewayUrl()
         val gatewayToken = preferences.getEffectiveGatewayToken()
@@ -142,6 +152,11 @@ class GatewayServiceImpl @Inject constructor(
         if (gatewayUrl.isEmpty()) {
             Log.d(TAG, "No gateway URL configured, staying offline")
             _connectionStatus.value = ConnectionStatus.Offline
+            return
+        }
+
+        if (awaitingPairingApproval) {
+            Log.d(TAG, "Awaiting pairing approval, connect skipped")
             return
         }
 
@@ -156,7 +171,8 @@ class GatewayServiceImpl @Inject constructor(
         }
 
         reconnectAttempts = 0
-        reconnectScheduled = false
+        reconnectScheduled.set(false)
+        awaitingPairingApproval = false
         _connectionStatus.value = ConnectionStatus.Connecting
 
         doConnect(gatewayUrl)
@@ -238,6 +254,7 @@ class GatewayServiceImpl @Inject constructor(
 
     override suspend fun disconnect() {
         Log.d(TAG, "Disconnecting...")
+        suppressAutoReconnect.set(true)
         // Cancel all pending reconnect jobs
         reconnectScope.coroutineContext[Job]?.children?.forEach { it.cancel() }
         cancelPendingConnect()
@@ -254,13 +271,15 @@ class GatewayServiceImpl @Inject constructor(
         webSocketSession = null
         connectionScope?.cancel()
         connectionScope = null
+        awaitingPairingApproval = false
         _connectionStatus.value = ConnectionStatus.Offline
         reconnectAttempts = 0
-        reconnectScheduled = false
+        reconnectScheduled.set(false)
     }
 
     override suspend fun reconnect() {
         Log.d(TAG, "Manual reconnect requested")
+        awaitingPairingApproval = false
         disconnect()
         delay(500)
         connect()
@@ -271,12 +290,28 @@ class GatewayServiceImpl @Inject constructor(
      * Uses exponential backoff: 2s, 4s, 8s, 16s, 30s (capped).
      */
     private fun scheduleReconnect() {
+        if (suppressAutoReconnect.get()) {
+            Log.d(TAG, "Auto-reconnect suppressed during manual disconnect/reconnect")
+            return
+        }
+        if (awaitingPairingApproval) {
+            Log.d(TAG, "Awaiting pairing approval, auto-reconnect paused")
+            cancelPendingConnect()
+            pingJob?.cancel()
+            receiveJob?.cancel()
+            pendingRequests.clear()
+            webSocketSession = null
+            connectionScope?.cancel()
+            connectionScope = null
+            reconnectScheduled.set(false)
+            return
+        }
+
         // Prevent double-scheduling (receive error + connection error can fire in quick succession)
-        if (reconnectScheduled) {
+        if (!reconnectScheduled.compareAndSet(false, true)) {
             Log.d(TAG, "Reconnect already scheduled, skipping")
             return
         }
-        reconnectScheduled = true
 
         // Clean up current connection
         cancelPendingConnect()
@@ -296,7 +331,7 @@ class GatewayServiceImpl @Inject constructor(
 
         reconnectScope.launch {
             delay(delayMs)
-            reconnectScheduled = false
+            reconnectScheduled.set(false)
             val gatewayUrl = preferences.getEffectiveGatewayUrl()
             if (gatewayUrl.isNotEmpty()) {
                 doConnect(gatewayUrl)
@@ -618,6 +653,17 @@ class GatewayServiceImpl @Inject constructor(
                     scheduleReconnect()
                 }
             }
+            "device.pair.requested", "node.pair.requested" -> {
+                val requestId = payload
+                    ?.jsonObject
+                    ?.get("requestId")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                if (!requestId.isNullOrEmpty()) {
+                    Log.d(TAG, "Pairing event requested, requestId=$requestId, event=$event")
+                    _pairingRequested.tryEmit(requestId)
+                }
+            }
             else -> {
                 try {
                     val content = when (payload) {
@@ -882,11 +928,25 @@ class GatewayServiceImpl @Inject constructor(
                     sendConnect()
                 }
                 e is GatewayError.NotPaired -> {
+                    if (connectAuthMode == ConnectAuthMode.TokenOnly) {
+                        Log.e(TAG, "Gateway rejected token (pairing required)")
+                        _connectionStatus.value = ConnectionStatus.Error("Gateway rejected token (pairing required)")
+                        return
+                    }
+
                     val rid = e.requestId ?: "<unknown>"
                     Log.e(TAG, "Pairing required: requestId=$rid")
+                    awaitingPairingApproval = true
                     _connectionStatus.value = ConnectionStatus.Error(
                         "Pairing required. Approve in Control UI (Devices -> Pairing). requestId=$rid"
                     )
+                    runCatching {
+                        webSocketSession?.close(
+                            CloseReason(CloseReason.Codes.NORMAL, "Awaiting pairing approval")
+                        )
+                    }
+                    webSocketSession = null
+                    _pairingRequired.tryEmit(e.requestId ?: "")
                 }
                 else -> {
                     Log.e(TAG, "Connect handshake failed: ${e.message}")
@@ -986,6 +1046,7 @@ class GatewayServiceImpl @Inject constructor(
         return controlPlaneService.approvePairing(tenantId, requestId)
             .onSuccess {
                 Log.d(TAG, "Pairing approved, reconnecting...")
+                awaitingPairingApproval = false
                 reconnect()
             }
     }

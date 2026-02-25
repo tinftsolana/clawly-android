@@ -262,15 +262,10 @@ fun FullSettingsScreen(
                         icon = Icons.Default.Favorite,
                         iconTint = ClawlyColors.accentPrimary,
                         title = "Set Up Clawly",
-                        subtitle = if (BuildConfig.IS_WEB2 && !uiState.isFirebaseSignedIn)
-                            "Sign in to get started"
-                        else
-                            "Get started with your AI assistant",
+                        subtitle = "Get started with your AI assistant",
                         titleColor = ClawlyColors.accentPrimary,
                         onClick = {
-                            if (BuildConfig.IS_WEB2 && !uiState.isFirebaseSignedIn) {
-                                onNavigateToLogin()
-                            } else if (uiState.isPremium) {
+                            if (uiState.isPremium) {
                                 onNavigateToAuthProvider()
                             } else {
                                 onNavigateToPaywall()

@@ -43,6 +43,7 @@ class GatewayPreferences @Inject constructor(
         private val KEY_MANAGED_STATUS = stringPreferencesKey("managed_status")
         private val KEY_MANAGED_GATEWAY_URL = stringPreferencesKey("managed_gateway_url")
         private val KEY_MANAGED_GATEWAY_TOKEN = stringPreferencesKey("managed_gateway_token")
+        private val KEY_MANAGED_SESSION_KEY = stringPreferencesKey("managed_session_key")
         private val KEY_SELECTED_AI_PROVIDER = stringPreferencesKey("selected_ai_provider")
         private val KEY_THINKING_LEVEL = stringPreferencesKey("thinking_level")
         private val KEY_USE_DEBUG_DEFAULTS = booleanPreferencesKey("use_debug_defaults")
@@ -464,7 +465,29 @@ class GatewayPreferences @Inject constructor(
             prefs.remove(KEY_MANAGED_STATUS)
             prefs.remove(KEY_MANAGED_GATEWAY_URL)
             prefs.remove(KEY_MANAGED_GATEWAY_TOKEN)
+            prefs.remove(KEY_MANAGED_SESSION_KEY)
         }
+    }
+
+    suspend fun clearManagedSessionKey() {
+        dataStore.edit { prefs ->
+            prefs.remove(KEY_MANAGED_SESSION_KEY)
+        }
+    }
+
+    suspend fun getOrCreateManagedSessionKey(): String {
+        val existing = dataStore.data.first()[KEY_MANAGED_SESSION_KEY]
+        if (!existing.isNullOrEmpty()) return existing
+        val instanceId = getOrCreateInstanceId()
+        val suffixRaw = instanceId.replace("-", "")
+        val suffix = suffixRaw.takeLast(12).ifEmpty {
+            System.currentTimeMillis().toString(16).takeLast(12)
+        }
+        val sessionKey = "agent:main:android-$suffix"
+        dataStore.edit { prefs ->
+            prefs[KEY_MANAGED_SESSION_KEY] = sessionKey
+        }
+        return sessionKey
     }
 
     // Clear self-hosted info

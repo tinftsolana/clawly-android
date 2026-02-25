@@ -25,6 +25,12 @@ interface GatewayService {
     /** Current streaming state */
     val streamingState: StateFlow<StreamingState>
 
+    /** Emits requestId when server requires device pairing approval */
+    val pairingRequired: Flow<String>
+
+    /** Emits requestId when gateway broadcasts pairing request event */
+    val pairingRequested: Flow<String>
+
     /** Connect to the gateway */
     suspend fun connect()
 

@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 fun ChatNavBar(
     connectionStatus: ConnectionStatus,
     onSettingsClick: () -> Unit,
+    showPremiumCrown: Boolean,
+    onPremiumClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -80,12 +82,26 @@ fun ChatNavBar(
             )
         }
 
-        // Status dot (right)
-        Box(
-            modifier = Modifier.size(44.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            ConnectionDot(status = connectionStatus)
+        if (showPremiumCrown) {
+            IconButton(
+                onClick = onPremiumClick,
+                modifier = Modifier.size(44.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_crown),
+                    contentDescription = "Get premium",
+                    tint = Color(0xFFFFC107),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        } else {
+            // Status dot (right)
+            Box(
+                modifier = Modifier.size(44.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                ConnectionDot(status = connectionStatus)
+            }
         }
     }
 }
