@@ -9,7 +9,10 @@ import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.navigation.ClawlyNavHost
 import ai.clawly.app.ui.theme.ClawlyColors
+import android.util.Log
 import com.revenuecat.purchases.Purchases
+import com.revenuecat.purchases.PurchasesError
+import com.revenuecat.purchases.interfaces.LogInCallback
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -39,6 +42,9 @@ class AppViewModel @Inject constructor(
     private val controlPlaneService: ControlPlaneService,
     private val deviceIdentityManager: DeviceIdentityManager
 ) : ViewModel() {
+    companion object {
+        private const val TAG = "AppViewModel"
+    }
 
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -66,7 +72,25 @@ class AppViewModel @Inject constructor(
                 try {
                     val deviceId = deviceIdentityManager.loadOrCreateIdentity()?.deviceId
                     if (!deviceId.isNullOrEmpty()) {
-                        Purchases.sharedInstance.logIn(deviceId, null)
+                        Log.i(TAG, "RevenueCat logIn start (startup): userId=${deviceId.take(12)}...")
+                        Purchases.sharedInstance.logIn(deviceId, object : LogInCallback {
+                            override fun onReceived(
+                                customerInfo: com.revenuecat.purchases.CustomerInfo,
+                                created: Boolean
+                            ) {
+                                Log.i(
+                                    TAG,
+                                    "RevenueCat logIn success (startup): " +
+                                        "created=$created, appUserId=${customerInfo.originalAppUserId}, " +
+                                        "activeEntitlements=${customerInfo.entitlements.active.keys}, " +
+                                        "activeSubscriptions=${customerInfo.activeSubscriptions}"
+                                )
+                            }
+
+                            override fun onError(error: PurchasesError) {
+                                Log.e(TAG, "RevenueCat logIn error (startup): ${error.message}")
+                            }
+                        })
                         purchaseService.checkSubscriptionStatus()
                     }
                 } catch (_: Exception) { }
@@ -82,15 +106,15 @@ class AppViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = resolveSyncUserId()
             if (userId.isNullOrEmpty()) {
-                android.util.Log.w("AppViewModel", "Startup sync-purchases skipped: no userId available")
+                Log.w(TAG, "Startup sync-purchases skipped: no userId available")
                 return@launch
             }
             controlPlaneService.syncPurchases(userId).fold(
                 onSuccess = { credits ->
-                    android.util.Log.d("AppViewModel", "Startup sync-purchases success: credits=$credits")
+                    Log.d(TAG, "Startup sync-purchases success: credits=$credits")
                 },
                 onFailure = { e ->
-                    android.util.Log.e("AppViewModel", "Startup sync-purchases failed", e)
+                    Log.e(TAG, "Startup sync-purchases failed", e)
                 }
             )
         }

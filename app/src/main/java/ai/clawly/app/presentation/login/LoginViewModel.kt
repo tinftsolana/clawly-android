@@ -10,7 +10,9 @@ import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.service.PurchaseService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.revenuecat.purchases.PurchasesError
 import com.revenuecat.purchases.Purchases
+import com.revenuecat.purchases.interfaces.LogInCallback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,7 +80,24 @@ class LoginViewModel @Inject constructor(
                     Log.d(TAG, "Linking RevenueCat with deviceId: ${revenueCatUserId?.take(12)}...")
                     try {
                         if (!revenueCatUserId.isNullOrEmpty()) {
-                            Purchases.sharedInstance.logIn(revenueCatUserId, null)
+                            Purchases.sharedInstance.logIn(revenueCatUserId, object : LogInCallback {
+                                override fun onReceived(
+                                    customerInfo: com.revenuecat.purchases.CustomerInfo,
+                                    created: Boolean
+                                ) {
+                                    Log.i(
+                                        TAG,
+                                        "RevenueCat logIn success (google sign-in): " +
+                                            "created=$created, appUserId=${customerInfo.originalAppUserId}, " +
+                                            "activeEntitlements=${customerInfo.entitlements.active.keys}, " +
+                                            "activeSubscriptions=${customerInfo.activeSubscriptions}"
+                                    )
+                                }
+
+                                override fun onError(error: PurchasesError) {
+                                    Log.e(TAG, "RevenueCat logIn error (google sign-in): ${error.message}")
+                                }
+                            })
                         }
                         purchaseService.checkSubscriptionStatus()
                     } catch (e: Exception) {
