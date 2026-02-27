@@ -59,7 +59,7 @@ fun PaywallScreen(
     val isSmallScreen = screenHeight < 700
 
     var animateContent by remember { mutableStateOf(false) }
-    var showCloseButton by remember { mutableStateOf(false) }
+    var showCloseButton by remember { mutableStateOf(true) }
     var selectedPlan by remember { mutableStateOf(PlanType.Yearly) }
     var chipsFloating by remember { mutableStateOf(false) }
 
@@ -78,9 +78,6 @@ fun PaywallScreen(
     LaunchedEffect(Unit) {
         animateContent = true
         chipsFloating = true
-        // Show close button after 2 seconds (ASO best practice)
-        delay(2000)
-        showCloseButton = true
     }
 
     Box(

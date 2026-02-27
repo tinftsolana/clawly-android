@@ -77,11 +77,7 @@ class ClawlyApplication : Application() {
             .build()
 
         remoteConfig.setConfigSettingsAsync(settings)
-        remoteConfig.setDefaultsAsync(
-            mapOf(
-                RemoteConfigFlags.KEY_SELF_HOSTED_WITHOUT_PREMIUM to false
-            )
-        )
+        remoteConfig.setDefaultsAsync(R.xml.remote_config_defaults)
         remoteConfig.fetchAndActivate()
             .addOnSuccessListener { activated ->
                 val selfHostedNoPremium = remoteConfig.getBoolean(RemoteConfigFlags.KEY_SELF_HOSTED_WITHOUT_PREMIUM)

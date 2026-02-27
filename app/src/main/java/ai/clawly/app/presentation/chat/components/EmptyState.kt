@@ -173,7 +173,7 @@ private fun FloatingSuggestionChips(
             )
         }
 
-        // Row 2: Emails, Travel, Calendar
+        // Row 2: Emails, Travel
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -191,6 +191,12 @@ private fun FloatingSuggestionChips(
                 isFloating = chipsFloating,
                 onClick = { onSuggestionClick("Book hotels & flights") }
             )
+        }
+
+        // Row 3: Calendar, Draft
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             FloatingChip(
                 emoji = "📅",
                 text = "Calendar",
@@ -198,12 +204,6 @@ private fun FloatingSuggestionChips(
                 isFloating = chipsFloating,
                 onClick = { onSuggestionClick("What's on my calendar today?") }
             )
-        }
-
-        // Row 3: Draft, Research
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
             FloatingChip(
                 emoji = "📝",
                 text = "Draft",
@@ -211,6 +211,12 @@ private fun FloatingSuggestionChips(
                 isFloating = chipsFloating,
                 onClick = { onSuggestionClick("Draft a professional email") }
             )
+        }
+
+        // Row 4: Research
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             FloatingChip(
                 emoji = "🔍",
                 text = "Research",
