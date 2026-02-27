@@ -30,8 +30,8 @@ android {
         applicationId = "ai.clawly.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.0"
+        versionCode = 14
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

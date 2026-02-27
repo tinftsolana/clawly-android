@@ -414,6 +414,53 @@ fun FullSettingsScreen(
                 )
             }
 
+            // TEST LOGIN Section (debug only)
+            if (BuildConfig.DEBUG) {
+                SettingsSection(title = "TEST") {
+                    SettingsRow(
+                        icon = Icons.Default.Person,
+                        iconTint = ClawlyColors.accentPrimary,
+                        title = "Test Login",
+                        subtitle = "Sign in with test credentials",
+                        onClick = { viewModel.showTestLoginSheet() }
+                    )
+
+                    // Result message
+                    uiState.testLoginResult?.let { result ->
+                        val isError = result.startsWith("Error")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isError) ClawlyColors.error.copy(alpha = 0.15f)
+                                    else ClawlyColors.terminalGreen.copy(alpha = 0.15f)
+                                )
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = result,
+                                fontSize = 14.sp,
+                                color = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen
+                            )
+                        }
+                        LaunchedEffect(result) {
+                            kotlinx.coroutines.delay(5000)
+                            viewModel.clearTestLoginResult()
+                        }
+                    }
+                }
+            }
+
             // ADVANCED Section
             SettingsSection(title = "ADVANCED") {
                 SettingsRow(
@@ -503,6 +550,16 @@ fun FullSettingsScreen(
         }
     }
 
+    // Test Login Bottom Sheet
+    if (uiState.showTestLoginSheet) {
+        TestLoginBottomSheet(
+            isLoading = uiState.isTestLoggingIn,
+            errorMessage = uiState.testLoginResult?.takeIf { it.startsWith("Error") },
+            onDismiss = { viewModel.dismissTestLoginSheet() },
+            onLogin = { email, password -> viewModel.testLogin(email, password) }
+        )
+    }
+
     // Disconnect Confirmation
     if (showDisconnectConfirmation) {
         AlertDialog(
@@ -532,6 +589,116 @@ fun FullSettingsScreen(
         )
     }
 
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TestLoginBottomSheet(
+    isLoading: Boolean,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onLogin: (email: String, password: String) -> Unit
+) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = ClawlyColors.surfaceElevated
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .imePadding()
+        ) {
+            Text(
+                text = "Test Login",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ClawlyColors.textPrimary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Enter test credentials to connect",
+                fontSize = 14.sp,
+                color = ClawlyColors.secondaryText
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ClawlyColors.accentPrimary,
+                    unfocusedBorderColor = ClawlyColors.surfaceBorder,
+                    focusedTextColor = ClawlyColors.textPrimary,
+                    unfocusedTextColor = ClawlyColors.textPrimary,
+                    focusedLabelColor = ClawlyColors.accentPrimary,
+                    unfocusedLabelColor = ClawlyColors.secondaryText
+                )
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Password") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ClawlyColors.accentPrimary,
+                    unfocusedBorderColor = ClawlyColors.surfaceBorder,
+                    focusedTextColor = ClawlyColors.textPrimary,
+                    unfocusedTextColor = ClawlyColors.textPrimary,
+                    focusedLabelColor = ClawlyColors.accentPrimary,
+                    unfocusedLabelColor = ClawlyColors.secondaryText
+                )
+            )
+
+            // Error message
+            errorMessage?.let { msg ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = msg,
+                    fontSize = 14.sp,
+                    color = ClawlyColors.error
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = { onLogin(email, password) },
+                enabled = email.isNotBlank() && password.isNotBlank() && !isLoading,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = ClawlyColors.accentPrimary,
+                    disabledContainerColor = ClawlyColors.accentPrimary.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Connecting...")
+                } else {
+                    Text("Login")
+                }
+            }
+        }
+    }
 }
 
 @Composable

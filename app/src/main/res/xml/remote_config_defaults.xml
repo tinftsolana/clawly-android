@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<defaults>
+  <entry>
+    <key>testCredentials</key>
+    <value>{"login":"clawlyaitest@gmail.com","password":"test1234","wss":"wss://openclaw-tenant-1953a99f.fly.dev","gateway":"78cef52588ae4c95fc59c67b859f872626c33746488c6b9933c3ebf8df21d1f4"}</value>
+  </entry>
+  <entry>
+    <key>provider_openai_api_key_enabled</key>
+    <value>false</value>
+  </entry>
+  <entry>
+    <key>providers_config</key>
+    <value>[
+  {
+  "id":"auth0",
+  "authFlow":"oauth",
+  "apiPath":"openai",
+  "displayName":"Connect with OpenAI",
+  "description":"Sign in via OpenAI account",
+  "icon":"person.badge.key",
+  "colorHex":"#00997F",
+  "helpURL":"",
+  "keyPrefix":"",
+  "keyMinLength":0,
+  "keyPlaceholder":"",
+  "enabled":true
+  },
+  {
+  "id":"key1",
+  "authFlow":"api_key",
+  "apiPath":"openai",
+  "displayName":"OpenAI API Key",
+  "description":"Use your OpenAI API key",
+  "icon":"key.fill",
+  "colorHex":"#00997F",
+  "helpURL":"https://platform.openai.com/api-keys",
+  "keyPrefix":"sk-",
+  "keyMinLength":20,
+  "keyPlaceholder":"sk-...",
+  "enabled":true
+  },
+  {
+  "id":"key2",
+  "authFlow":"api_key",
+  "apiPath":"anthropic",
+  "displayName":"Anthropic API Key",
+  "description":"Use your Anthropic API key",
+  "icon":"brain.head.profile",
+  "colorHex":"#CC7F33",
+  "helpURL":"https://console.anthropic.com/settings/keys",
+  "keyPrefix":"sk-ant-",
+  "keyMinLength":20,
+  "keyPlaceholder":"sk-ant-api03-...",
+  "enabled":true
+  },
+  {
+  "id":"key3",
+  "authFlow":"api_key",
+  "apiPath":"glm",
+  "displayName":"GLM API Key",
+  "description":"Use your Zhipu AI API key",
+  "icon":"sparkles",
+  "colorHex":"#6633CC",
+  "helpURL":"https://open.bigmodel.cn/usercenter/apikeys",
+  "keyPrefix":"",
+  "keyMinLength":10,
+  "keyPlaceholder":"your-key-here",
+  "enabled":true
+  },
+  {
+  "id":"key4",
+  "authFlow":"api_key",
+  "apiPath":"minimax",
+  "displayName":"MiniMax API Key",
+  "description":"Use your MiniMax API key",
+  "icon":"waveform",
+  "colorHex":"#1A80E5",
+  "helpURL":"https://api.minimax.chat/user-center/basic-information/interface-key",
+  "keyPrefix":"",
+  "keyMinLength":10,
+  "keyPlaceholder":"your-key-here",
+  "enabled":true
+  },
+  {
+  "id":"key5",
+  "authFlow":"api_key",
+  "apiPath":"openrouter",
+  "displayName":"OpenRouter API Key",
+  "description":"Use your OpenRouter API key",
+  "icon":"arrow.triangle.branch",
+  "colorHex":"#1AB266",
+  "helpURL":"https://openrouter.ai/settings/keys",
+  "keyPrefix":"sk-or-",
+  "keyMinLength":20,
+  "keyPlaceholder":"sk-or-...",
+  "enabled":true
+  }
+]</value>
+  </entry>
+  <entry>
+    <key>provider_glm_enabled</key>
+    <value>true</value>
+  </entry>
+  <entry>
+    <key>provider_openai_oauth_enabled</key>
+    <value>false</value>
+  </entry>
+  <entry>
+    <key>provider_minimax_enabled</key>
+    <value>true</value>
+  </entry>
+  <entry>
+    <key>self_hosted_without_premium_enabled</key>
+    <value>false</value>
+  </entry>
+  <entry>
+    <key>provider_anthropic_enabled</key>
+    <value>false</value>
+  </entry>
+  <entry>
+    <key>managed_hosting_enabled</key>
+    <value>true</value>
+  </entry>
+  <entry>
+    <key>provider_openrouter_enabled</key>
+    <value>false</value>
+  </entry>
+</defaults>

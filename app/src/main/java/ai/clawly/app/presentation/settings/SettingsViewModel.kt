@@ -61,7 +61,11 @@ data class SettingsUiState(
     val firebaseUserEmail: String? = null,
     val firebaseUserPhotoUrl: String? = null,
     val isFirebaseSignedIn: Boolean = false,
-    val allowSelfHostedWithoutPremium: Boolean = false
+    val allowSelfHostedWithoutPremium: Boolean = false,
+    // Test login (debug only)
+    val showTestLoginSheet: Boolean = false,
+    val isTestLoggingIn: Boolean = false,
+    val testLoginResult: String? = null
 ) {
     /** Format credits for display (e.g., 1,000,000 → "1.0M") */
     val creditsFormatted: String
@@ -728,5 +732,65 @@ class SettingsViewModel @Inject constructor(
 
     fun clearDebugCreditsResult() {
         _uiState.update { it.copy(debugCreditsResult = null) }
+    }
+
+    // MARK: - Test Login (Debug)
+
+    fun showTestLoginSheet() {
+        if (!BuildConfig.DEBUG) return
+        _uiState.update { it.copy(showTestLoginSheet = true, testLoginResult = null) }
+    }
+
+    fun dismissTestLoginSheet() {
+        _uiState.update { it.copy(showTestLoginSheet = false) }
+    }
+
+    fun testLogin(email: String, password: String) {
+        if (!BuildConfig.DEBUG) return
+
+        val creds = RemoteConfigFlags.getTestCredentials()
+        if (creds == null) {
+            _uiState.update { it.copy(testLoginResult = "Error: No test credentials configured") }
+            return
+        }
+
+        if (email != creds.login || password != creds.password) {
+            _uiState.update { it.copy(testLoginResult = "Error: Invalid credentials") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTestLoggingIn = true, testLoginResult = null) }
+
+            try {
+                // Configure gateway with test WSS + token
+                authProviderRepository.configureSelfHosted(creds.wss, creds.gateway)
+
+                // Set premium
+                setDebugPremiumOverride(true)
+
+                // Gateway auto-connects via configureSelfHosted → reconnect()
+
+                _uiState.update {
+                    it.copy(
+                        isTestLoggingIn = false,
+                        showTestLoginSheet = false,
+                        testLoginResult = "Connected to test gateway"
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "Test login failed", e)
+                _uiState.update {
+                    it.copy(
+                        isTestLoggingIn = false,
+                        testLoginResult = "Error: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearTestLoginResult() {
+        _uiState.update { it.copy(testLoginResult = null) }
     }
 }
