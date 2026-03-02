@@ -414,49 +414,47 @@ fun FullSettingsScreen(
                 )
             }
 
-            // TEST LOGIN Section (debug only)
-            if (BuildConfig.DEBUG) {
-                SettingsSection(title = "TEST") {
-                    SettingsRow(
-                        icon = Icons.Default.Person,
-                        iconTint = ClawlyColors.accentPrimary,
-                        title = "Test Login",
-                        subtitle = "Sign in with test credentials",
-                        onClick = { viewModel.showTestLoginSheet() }
-                    )
+            // TEST LOGIN Section
+            SettingsSection(title = "TEST") {
+                SettingsRow(
+                    icon = Icons.Default.Person,
+                    iconTint = ClawlyColors.accentPrimary,
+                    title = "Test Login",
+                    subtitle = "Sign in with test credentials",
+                    onClick = { viewModel.showTestLoginSheet() }
+                )
 
-                    // Result message
-                    uiState.testLoginResult?.let { result ->
-                        val isError = result.startsWith("Error")
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (isError) ClawlyColors.error.copy(alpha = 0.15f)
-                                    else ClawlyColors.terminalGreen.copy(alpha = 0.15f)
-                                )
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen,
-                                modifier = Modifier.size(18.dp)
+                // Result message
+                uiState.testLoginResult?.let { result ->
+                    val isError = result.startsWith("Error")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isError) ClawlyColors.error.copy(alpha = 0.15f)
+                                else ClawlyColors.terminalGreen.copy(alpha = 0.15f)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = result,
-                                fontSize = 14.sp,
-                                color = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen
-                            )
-                        }
-                        LaunchedEffect(result) {
-                            kotlinx.coroutines.delay(5000)
-                            viewModel.clearTestLoginResult()
-                        }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = result,
+                            fontSize = 14.sp,
+                            color = if (isError) ClawlyColors.error else ClawlyColors.terminalGreen
+                        )
+                    }
+                    LaunchedEffect(result) {
+                        kotlinx.coroutines.delay(5000)
+                        viewModel.clearTestLoginResult()
                     }
                 }
             }

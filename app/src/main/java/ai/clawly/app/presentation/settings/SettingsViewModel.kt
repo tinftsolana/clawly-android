@@ -62,7 +62,7 @@ data class SettingsUiState(
     val firebaseUserPhotoUrl: String? = null,
     val isFirebaseSignedIn: Boolean = false,
     val allowSelfHostedWithoutPremium: Boolean = false,
-    // Test login (debug only)
+    // Test login
     val showTestLoginSheet: Boolean = false,
     val isTestLoggingIn: Boolean = false,
     val testLoginResult: String? = null
@@ -734,10 +734,9 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(debugCreditsResult = null) }
     }
 
-    // MARK: - Test Login (Debug)
+    // MARK: - Test Login
 
     fun showTestLoginSheet() {
-        if (!BuildConfig.DEBUG) return
         _uiState.update { it.copy(showTestLoginSheet = true, testLoginResult = null) }
     }
 
@@ -746,8 +745,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun testLogin(email: String, password: String) {
-        if (!BuildConfig.DEBUG) return
-
         val creds = RemoteConfigFlags.getTestCredentials()
         if (creds == null) {
             _uiState.update { it.copy(testLoginResult = "Error: No test credentials configured") }
