@@ -335,6 +335,7 @@ fun ChatScreen(
                     streamingContent = uiState.streamingContent,
                     onRetry = { viewModel.retryLastMessage() },
                     onReconnect = { viewModel.reconnect() },
+                    onTopUpCreditsClick = onNavigateToPaywall,
                     listState = listState,
                     contentPadding = PaddingValues(
                         top = topBarHeight + 48.dp,

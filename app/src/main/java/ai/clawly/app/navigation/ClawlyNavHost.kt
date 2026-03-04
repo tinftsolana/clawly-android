@@ -302,25 +302,35 @@ fun ClawlyNavHost(
         composable<Web3PaywallRoute> {
             val viewModel: Web3PaywallViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsState()
-
-            // Navigate to chat on purchase success
-            if (uiState.purchaseSuccess) {
-                navController.navigate(ChatRoute) {
-                    popUpTo(Web3PaywallRoute) { inclusive = true }
-                }
-            }
+            val offers by viewModel.offers.collectAsState()
+            val isLoadingOffers by viewModel.isLoadingOffers.collectAsState()
 
             Web3PaywallScreen(
                 walletAddress = uiState.walletAddress,
                 isWalletConnected = uiState.isWalletConnected,
                 isConnecting = uiState.isConnecting,
                 isPurchasing = uiState.isPurchasing,
+                isLoadingOffers = isLoadingOffers,
+                isWaitingForConfirmation = uiState.isWaitingForConfirmation,
+                isRestoringCredits = uiState.isRestoringCredits,
+                offers = offers,
                 selectedPackageId = uiState.selectedPackageId,
+                currentCredits = uiState.currentCredits,
+                purchaseSuccess = uiState.purchaseSuccess,
+                creditsReceived = uiState.creditsReceived,
                 onConnectWallet = { viewModel.connectWallet() },
                 onSelectPackage = { viewModel.selectPackage(it) },
                 onPurchase = { viewModel.purchaseCredits() },
+                onRestoreCredits = { viewModel.restoreCredits() },
                 onDismiss = {
                     // Go to chat after dismissing
+                    navController.navigate(ChatRoute) {
+                        popUpTo(Web3PaywallRoute) { inclusive = true }
+                    }
+                },
+                onSuccessDismiss = {
+                    // Reset state and navigate to chat after success
+                    viewModel.resetPurchaseState()
                     navController.navigate(ChatRoute) {
                         popUpTo(Web3PaywallRoute) { inclusive = true }
                     }

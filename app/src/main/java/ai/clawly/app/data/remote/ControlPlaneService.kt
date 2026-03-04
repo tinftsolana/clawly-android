@@ -3,6 +3,7 @@ package ai.clawly.app.data.remote
 import ai.clawly.app.BuildConfig
 import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.preferences.SolanaAuthPreferences
 import ai.clawly.app.domain.model.ManagedInstanceInfo
 import ai.clawly.app.domain.model.ManagedInstanceStatus
 import android.util.Log
@@ -96,10 +97,11 @@ data class PairingDevicesResponse(
 @Singleton
 class ControlPlaneService @Inject constructor(
     private val preferences: GatewayPreferences,
-    private val firebaseAuthService: FirebaseAuthService
+    private val firebaseAuthService: FirebaseAuthService,
+    private val solanaAuthPreferences: SolanaAuthPreferences
 ) {
     companion object {
-        const val BASE_URL = "http://157.245.185.252:3003"
+        val BASE_URL = if (BuildConfig.IS_WEB3) "http://157.245.185.252:3004" else "http://157.245.185.252:3003"
     }
 
     private val json = Json {
@@ -139,20 +141,34 @@ class ControlPlaneService @Inject constructor(
 
     /**
      * Add auth headers:
-     * - Firebase Bearer token for signed-in web2 users
-     * - X-User-Id fallback for user-scoped requests
+     * - Web2 signed-in: Firebase Bearer token
+     * - Web2 guest: X-User-Id header (device ID)
+     * - Web3: Solana JWT REQUIRED (throws if missing)
      */
     private suspend fun HttpRequestBuilder.addAuthHeaders(userId: String?) {
-        if (BuildConfig.IS_WEB2 && firebaseAuthService.isSignedIn) {
+        // Web3: MUST have Solana JWT
+        if (BuildConfig.IS_WEB3) {
+            val solanaJwt = solanaAuthPreferences.getValidToken()
+            if (solanaJwt != null) {
+                Log.d(TAG, "AUTH: Using Bearer token (Solana JWT)")
+                header("Authorization", "Bearer $solanaJwt")
+                return
+            }
+            Log.e(TAG, "AUTH: Web3 requires Solana JWT but none available")
+            throw SolanaAuthRequiredException()
+        }
+
+        // Web2: Use Firebase token if signed in
+        if (firebaseAuthService.isSignedIn) {
             firebaseAuthService.getIdToken(forceRefresh = false).onSuccess { token ->
                 Log.d(TAG, "AUTH: Using Bearer token (Firebase signed in)")
                 header("Authorization", "Bearer $token")
             }.onFailure { e ->
                 Log.e(TAG, "AUTH: Firebase signed in but getIdToken FAILED, falling back to X-User-Id", e)
             }
-        } else {
-            Log.d(TAG, "AUTH: Firebase not signed in (isWeb2=${BuildConfig.IS_WEB2}, isSignedIn=${firebaseAuthService.isSignedIn})")
         }
+
+        // Web2 guest: X-User-Id
         if (!userId.isNullOrBlank()) {
             Log.d(TAG, "AUTH: Using X-User-Id=$userId")
             header("X-User-Id", userId)
@@ -160,6 +176,12 @@ class ControlPlaneService @Inject constructor(
             Log.w(TAG, "AUTH: No Firebase token and no X-User-Id available")
         }
     }
+
+    /**
+     * Exception thrown when Solana JWT is required but not available.
+     * UI should catch this and show sign-in bottom sheet.
+     */
+    class SolanaAuthRequiredException : Exception("Solana signature required")
 
     // MARK: - Auth
 

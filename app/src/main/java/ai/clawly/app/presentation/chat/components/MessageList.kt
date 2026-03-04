@@ -18,6 +18,7 @@ fun MessageList(
     streamingContent: String,
     onRetry: () -> Unit,
     onReconnect: () -> Unit,
+    onTopUpCreditsClick: () -> Unit,
     listState: LazyListState,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp)
@@ -39,7 +40,10 @@ fun MessageList(
                     onReconnect = onReconnect
                 )
             } else {
-                MessageBubble(message = message)
+                MessageBubble(
+                    message = message,
+                    onTopUpCreditsClick = onTopUpCreditsClick
+                )
             }
         }
 

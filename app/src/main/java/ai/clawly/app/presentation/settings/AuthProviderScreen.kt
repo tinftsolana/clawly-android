@@ -2,6 +2,7 @@ package ai.clawly.app.presentation.settings
 
 import ai.clawly.app.domain.model.HostingType
 import ai.clawly.app.domain.model.ManagedInstanceStatus
+import ai.clawly.app.presentation.common.SignInBottomSheet
 import ai.clawly.app.ui.theme.ClawlyColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -285,6 +286,19 @@ fun AuthProviderScreen(
             }
         )
     }
+
+    // Web3 Sign-In Bottom Sheet
+    SignInBottomSheet(
+        isVisible = uiState.showSignInSheet,
+        isSigning = uiState.isSigning,
+        onDismiss = { viewModel.hideSignInSheet() },
+        onSignClick = {
+            viewModel.performSiwsSignIn(
+                onSuccess = { viewModel.showProvisioningView() },
+                onError = { /* Error handled in ViewModel */ }
+            )
+        }
+    )
 }
 
 @Composable

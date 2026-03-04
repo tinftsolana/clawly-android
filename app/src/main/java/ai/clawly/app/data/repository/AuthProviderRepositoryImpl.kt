@@ -547,15 +547,59 @@ class AuthProviderRepositoryImpl @Inject constructor(
         preferences.setSelectedAiProvider(provider)
     }
 
+    /**
+     * Refresh managed instance status from server.
+     * Call this when Settings screen appears to check if status changed while app was closed.
+     */
+    override suspend fun refreshManagedInstanceStatus() {
+        val config = _currentConfig.value
+        if (config.hostingType != HostingType.Managed) {
+            Log.d(TAG, "refreshManagedInstanceStatus: Not managed hosting, skipping")
+            return
+        }
+
+        val tenantId = config.managedInstance?.tenantId
+        if (tenantId == null) {
+            Log.d(TAG, "refreshManagedInstanceStatus: No tenant ID")
+            return
+        }
+
+        Log.d(TAG, "refreshManagedInstanceStatus: Checking status for tenant $tenantId")
+        _isSyncing.value = true
+
+        val userId = currentUserId
+        controlPlaneService.getInstance(tenantId, userId).fold(
+            onSuccess = { instance ->
+                Log.d(TAG, "refreshManagedInstanceStatus: Got status ${instance.status}")
+                updateManagedInstance(instance)
+                _isSyncing.value = false
+
+                // Start polling if still provisioning
+                if (instance.status.isInProgress) {
+                    startPolling(tenantId)
+                }
+            },
+            onFailure = { e ->
+                Log.e(TAG, "refreshManagedInstanceStatus: Failed", e)
+                _isSyncing.value = false
+            }
+        )
+    }
+
     private fun startPolling(tenantId: String) {
         stopPolling()
         _isSyncing.value = true
 
-        val userId = currentUserId
-
         pollingJob = scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
+
+                val userId = currentUserId
+                if (userId.isEmpty()) {
+                    Log.d(TAG, "Polling stopped: userId is empty (wallet disconnected?)")
+                    _isSyncing.value = false
+                    break
+                }
 
                 val result = controlPlaneService.getInstance(tenantId, userId)
                 result.onSuccess { instance ->

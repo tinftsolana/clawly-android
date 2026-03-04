@@ -102,6 +102,7 @@ class WalletViewModel @Inject constructor(
     fun disconnectWallet() {
         _uiState.update { it.copy(isDisconnecting = true) }
         viewModelScope.launch {
+            // JWT is now cleared centrally in ConnectWalletUseCase.disconnect()
             connectWalletUseCase.disconnect {
                 Log.d(TAG, "Wallet disconnected callback")
             }

@@ -13,10 +13,15 @@ import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.model.AuthProviderConfig
 import ai.clawly.app.domain.model.ConnectionStatus
 import ai.clawly.app.domain.model.HostingType
+import ai.clawly.app.data.remote.ControlPlaneService.SolanaAuthRequiredException
 import ai.clawly.app.domain.repository.AuthProviderRepository
 import ai.clawly.app.domain.repository.ChatRepository
+import ai.clawly.app.domain.repository.SolanaAuthRepository
+import ai.clawly.app.domain.model.UserWalletDetails
 import ai.clawly.app.domain.repository.WalletRepository
+import ai.clawly.app.domain.usecase.ConnectWalletUseCase
 import ai.clawly.app.domain.usecase.GatewayConnectionUseCase
+import ai.clawly.app.domain.usecase.WalletConnectionUseCase
 import ai.clawly.app.domain.usecase.Web3CreditsUseCase
 import com.revenuecat.purchases.Purchases
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
@@ -65,7 +70,11 @@ data class SettingsUiState(
     // Test login
     val showTestLoginSheet: Boolean = false,
     val isTestLoggingIn: Boolean = false,
-    val testLoginResult: String? = null
+    val testLoginResult: String? = null,
+    // Web3 SIWS sign-in
+    val showSignInSheet: Boolean = false,
+    val isSigning: Boolean = false,
+    val hasValidJwt: Boolean = false
 ) {
     /** Format credits for display (e.g., 1,000,000 → "1.0M") */
     val creditsFormatted: String
@@ -116,7 +125,10 @@ class SettingsViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val analytics: AmplitudeAnalyticsService,
     private val firebaseAuthService: FirebaseAuthService,
-    private val purchaseService: PurchaseService
+    private val purchaseService: PurchaseService,
+    private val solanaAuthRepository: SolanaAuthRepository,
+    private val connectWalletUseCase: ConnectWalletUseCase,
+    private val walletConnectionUseCase: WalletConnectionUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -155,6 +167,44 @@ class SettingsViewModel @Inject constructor(
         observeAuthConfig()
         observeConnectionStatus()
         observeFirebaseAuth()
+        observeJwtStatus()
+        if (BuildConfig.IS_WEB3) {
+            observeWalletConnection()
+        }
+    }
+
+    private fun observeJwtStatus() {
+        if (!BuildConfig.IS_WEB3) return
+
+        viewModelScope.launch {
+            solanaAuthRepository.isAuthenticatedFlow.collect { isAuthenticated ->
+                _uiState.update { it.copy(hasValidJwt = isAuthenticated) }
+            }
+        }
+    }
+
+    private fun observeWalletConnection() {
+        viewModelScope.launch {
+            walletConnectionUseCase.walletDetails.collect { details ->
+                when (details) {
+                    is UserWalletDetails.Connected -> {
+                        android.util.Log.d("SettingsViewModel", "Wallet connected: ${details.publicKey}")
+                        _uiState.update { it.copy(userId = details.publicKey) }
+                        refreshAuthConfig()
+                    }
+                    is UserWalletDetails.NotConnected -> {
+                        android.util.Log.d("SettingsViewModel", "Wallet disconnected")
+                        _uiState.update {
+                            it.copy(
+                                userId = "",
+                                hasValidJwt = false,
+                                credits = 0
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun loadRemoteFlags() {
@@ -291,18 +341,81 @@ class SettingsViewModel @Inject constructor(
      */
     fun refreshAuthConfig() {
         loadRemoteFlags()
+        // Force re-read from repository
         val currentConfig = authProviderRepository.currentConfig.value
         android.util.Log.d("SettingsViewModel", "refreshAuthConfig: hostingType=${currentConfig.hostingType}, isConfigured=${currentConfig.isConfigured}, isProvisioning=${currentConfig.isProvisioning}, managedInstance=${currentConfig.managedInstance?.tenantId}, firebaseSignedIn=${firebaseAuthService.isSignedIn}, currentUserId=$currentUserId")
         _uiState.update {
             it.copy(currentAuthConfig = currentConfig)
         }
+
+        // If managed hosting, refresh status from server (handles app kill during provisioning)
+        if (currentConfig.hostingType == HostingType.Managed && currentConfig.managedInstance != null) {
+            viewModelScope.launch {
+                authProviderRepository.refreshManagedInstanceStatus()
+            }
+        }
+
         if (currentConfig.hostingType == HostingType.Managed && currentConfig.isConfigured) {
             fetchCredits()
         }
 
-        // If not configured, try restoring existing tenants by current device userId.
+        // Web3: fetch credits if wallet is connected (needed for premium access check before setup)
+        if (BuildConfig.IS_WEB3 && currentConfig.hostingType != HostingType.Managed) {
+            val walletAddress = runBlocking { walletRepository.publicKeyFlow.first() }
+            if (walletAddress.isNotEmpty()) {
+                fetchCredits()
+            }
+        }
+
+        // Web2: check backend for existing tenants if signed in but no local config
         if (BuildConfig.IS_WEB2 && !currentConfig.isConfigured && !currentConfig.isProvisioning) {
             checkForExistingTenants()
+        }
+
+        // Web3: check backend for existing tenants if wallet connected but no local config
+        if (BuildConfig.IS_WEB3 && !currentConfig.isConfigured && !currentConfig.isProvisioning) {
+            val walletAddress = runBlocking { walletRepository.publicKeyFlow.first() }
+            if (walletAddress.isNotEmpty()) {
+                checkForExistingTenantsWeb3()
+            }
+        }
+    }
+
+    /**
+     * Check if user has existing tenants on the backend (Web3)
+     */
+    private fun checkForExistingTenantsWeb3() {
+        viewModelScope.launch {
+            val walletAddress = walletRepository.publicKeyFlow.first()
+            if (walletAddress.isEmpty()) {
+                android.util.Log.d("SettingsViewModel", "checkForExistingTenantsWeb3: No wallet connected")
+                return@launch
+            }
+
+            _uiState.update { it.copy(isSyncing = true) }
+            android.util.Log.d("SettingsViewModel", "checkForExistingTenantsWeb3: Checking for tenants for wallet $walletAddress")
+
+            controlPlaneService.getUserTenants(walletAddress).fold(
+                onSuccess = { tenants ->
+                    android.util.Log.d("SettingsViewModel", "checkForExistingTenantsWeb3: Found ${tenants.size} tenants")
+                    if (tenants.isNotEmpty()) {
+                        val existingTenant = tenants.first()
+                        android.util.Log.d("SettingsViewModel", "checkForExistingTenantsWeb3: Using tenant ${existingTenant.tenantId}, status=${existingTenant.status}")
+                        authProviderRepository.configureManaged(existingTenant.tenantId)
+                        authProviderRepository.updateManagedInstance(existingTenant)
+                    }
+                    _uiState.update { it.copy(isSyncing = false) }
+                },
+                onFailure = { e ->
+                    android.util.Log.e("SettingsViewModel", "checkForExistingTenantsWeb3: Failed", e)
+                    _uiState.update { it.copy(isSyncing = false) }
+
+                    // Show sign-in sheet if auth required
+                    if (e is SolanaAuthRequiredException) {
+                        _uiState.update { it.copy(showSignInSheet = true) }
+                    }
+                }
+            )
         }
     }
 
@@ -360,6 +473,12 @@ class SettingsViewModel @Inject constructor(
 
     fun fetchCredits() {
         viewModelScope.launch {
+            // Don't fetch if wallet is not connected (web3)
+            if (BuildConfig.IS_WEB3) {
+                val walletAddress = walletRepository.publicKeyFlow.first()
+                if (walletAddress.isEmpty()) return@launch
+            }
+
             _uiState.update { it.copy(isLoadingCredits = true) }
 
             controlPlaneService.getUser(currentUserId).fold(
@@ -378,6 +497,11 @@ class SettingsViewModel @Inject constructor(
                 onFailure = { e ->
                     android.util.Log.e("SettingsViewModel", "Failed to fetch credits", e)
                     _uiState.update { it.copy(isLoadingCredits = false) }
+
+                    // Show sign-in sheet if authentication required
+                    if (e is SolanaAuthRequiredException) {
+                        _uiState.update { it.copy(showSignInSheet = true) }
+                    }
                 }
             )
         }
@@ -432,6 +556,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             authProviderRepository.clearConfig()
             chatRepository.clearMessages()
+            gatewayConnectionUseCase.disconnect()
+            if (BuildConfig.IS_WEB3) {
+                web3CreditsUseCase.setCredits(0)
+            }
+            _uiState.update { it.copy(credits = 0) }
         }
     }
 
@@ -789,5 +918,46 @@ class SettingsViewModel @Inject constructor(
 
     fun clearTestLoginResult() {
         _uiState.update { it.copy(testLoginResult = null) }
+    }
+
+    // MARK: - Web3 SIWS Sign-In
+
+    fun showSignInSheet() {
+        _uiState.update { it.copy(showSignInSheet = true) }
+    }
+
+    fun hideSignInSheet() {
+        _uiState.update { it.copy(showSignInSheet = false) }
+    }
+
+    /**
+     * Perform SIWS authentication.
+     * Called when user taps "Sign" in the sign-in bottom sheet.
+     */
+    fun performSiwsSignIn() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSigning = true) }
+
+            val walletAddress = walletRepository.publicKeyFlow.first()
+            if (walletAddress.isEmpty()) {
+                android.util.Log.e("SettingsViewModel", "SIWS: No wallet connected")
+                _uiState.update { it.copy(isSigning = false, showSignInSheet = false) }
+                return@launch
+            }
+
+            android.util.Log.d("SettingsViewModel", "SIWS: Starting authentication for ${walletAddress.take(8)}...")
+
+            solanaAuthRepository.authenticate(walletAddress) { message ->
+                connectWalletUseCase.signMessage(message)
+            }.onSuccess {
+                android.util.Log.d("SettingsViewModel", "SIWS: Authentication successful")
+                _uiState.update { it.copy(isSigning = false, showSignInSheet = false) }
+                // Refresh to fetch data with new JWT
+                refreshAuthConfig()
+            }.onFailure { e ->
+                android.util.Log.e("SettingsViewModel", "SIWS: Authentication failed", e)
+                _uiState.update { it.copy(isSigning = false) }
+            }
+        }
     }
 }

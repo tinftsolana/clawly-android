@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,10 +24,15 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import java.text.SimpleDateFormat
 import java.util.*
+
+/** Custom tag for "Top Up Credits" button */
+private const val TAG_PIZDACLAW = "#pizdaclaw"
 
 private val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
 
@@ -47,7 +54,8 @@ private val AssistantBubbleShape = RoundedCornerShape(
 @Composable
 fun MessageBubble(
     message: ChatMessage,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onTopUpCreditsClick: (() -> Unit)? = null
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
@@ -124,10 +132,11 @@ fun MessageBubble(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                         )
                     } else {
-                        // Assistant messages: markdown rendering
+                        // Assistant messages: markdown rendering with custom tag support
                         MarkdownContent(
                             content = message.content,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            onTopUpCreditsClick = onTopUpCreditsClick
                         )
                     }
                 }
@@ -191,21 +200,96 @@ private fun AttachmentPreview(
 }
 
 /**
- * Assistant content renderer.
- * Uses plain Compose Text to avoid AppCompat widget requirements from markdown library.
+ * Markdown content renderer for assistant messages.
+ * Uses jeziellago/compose-markdown library.
+ * Supports custom tags like #pizdaclaw for "Top Up Credits" button.
  */
 @Composable
 fun MarkdownContent(
     content: String,
+    modifier: Modifier = Modifier,
+    onTopUpCreditsClick: (() -> Unit)? = null
+) {
+    // Check if content contains #pizdaclaw tag
+    if (content.contains(TAG_PIZDACLAW)) {
+        // Split content by the tag and render parts with button
+        val parts = content.split(TAG_PIZDACLAW)
+
+        Column(modifier = modifier) {
+            parts.forEachIndexed { index, part ->
+                // Render markdown part if not empty
+                if (part.isNotBlank()) {
+                    MarkdownText(
+                        markdown = part.trim(),
+                        style = TextStyle(
+                            color = ClawlyColors.textPrimary,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp
+                        ),
+                        linkColor = ClawlyColors.accentPrimary,
+                        syntaxHighlightColor = ClawlyColors.codeBackground,
+                        syntaxHighlightTextColor = ClawlyColors.codeText,
+                        headingBreakColor = ClawlyColors.surfaceBorder,
+                        isTextSelectable = true,
+                        disableLinkMovementMethod = false
+                    )
+                }
+
+                // Render "Top Up Credits" button after each part except the last
+                if (index < parts.size - 1) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TopUpCreditsButton(onClick = onTopUpCreditsClick)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+    } else {
+        // No custom tags - render normal markdown
+        MarkdownText(
+            markdown = content,
+            modifier = modifier,
+            style = TextStyle(
+                color = ClawlyColors.textPrimary,
+                fontSize = 15.sp,
+                lineHeight = 22.sp
+            ),
+            linkColor = ClawlyColors.accentPrimary,
+            syntaxHighlightColor = ClawlyColors.codeBackground,
+            syntaxHighlightTextColor = ClawlyColors.codeText,
+            headingBreakColor = ClawlyColors.surfaceBorder,
+            isTextSelectable = true,
+            disableLinkMovementMethod = false
+        )
+    }
+}
+
+/**
+ * "Top Up Credits" button rendered in place of #pizdaclaw tag
+ */
+@Composable
+private fun TopUpCreditsButton(
+    onClick: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
-    Text(
-        text = content,
-        modifier = modifier,
-        style = TextStyle(
-            color = ClawlyColors.textPrimary,
-            fontSize = 15.sp,
-            lineHeight = 22.sp
+    Button(
+        onClick = { onClick?.invoke() },
+        modifier = modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = ClawlyColors.accentPrimary
+        ),
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
         )
-    )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "Top Up Credits",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
 }

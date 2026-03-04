@@ -1,6 +1,7 @@
 package ai.clawly.app.presentation.paywall
 
 import ai.clawly.app.R
+import ai.clawly.app.data.remote.solana.SolanaOffer
 import ai.clawly.app.ui.theme.ClawlyColors
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
@@ -50,24 +51,47 @@ fun Web3PaywallScreen(
     isWalletConnected: Boolean,
     isConnecting: Boolean,
     isPurchasing: Boolean,
+    isLoadingOffers: Boolean = false,
+    isWaitingForConfirmation: Boolean = false,
+    isRestoringCredits: Boolean = false,
+    offers: List<SolanaOffer> = emptyList(),
     selectedPackageId: String?,
+    currentCredits: Int = 0,
+    purchaseSuccess: Boolean = false,
+    creditsReceived: Int = 0,
     onConnectWallet: () -> Unit,
     onSelectPackage: (String) -> Unit,
     onPurchase: () -> Unit,
-    onDismiss: () -> Unit
+    onRestoreCredits: () -> Unit,
+    onDismiss: () -> Unit,
+    onSuccessDismiss: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
     var animateContent by remember { mutableStateOf(false) }
     var showCloseButton by remember { mutableStateOf(false) }
 
-    val creditPackages = remember {
-        listOf(
-            CreditPackage("starter", 100, "0.05", "0.0005"),
-            CreditPackage("standard", 500, "0.20", "0.0004"),
-            CreditPackage("pro", 1000, "0.35", "0.00035"),
-            CreditPackage("whale", 5000, "1.50", "0.0003")
-        )
+    // Convert SolanaOffer to CreditPackage for display
+    // Use API offers if available, fallback to hardcoded for backward compatibility
+    val creditPackages = remember(offers) {
+        if (offers.isNotEmpty()) {
+            offers.map { offer ->
+                CreditPackage(
+                    id = offer.id,
+                    credits = offer.credits,
+                    priceSol = offer.getDisplayPrice().replace(" SOL", ""),
+                    pricePerCredit = offer.pricePerCredit ?: String.format("%.6f", offer.getLamports().toDouble() / 1_000_000_000 / offer.credits)
+                )
+            }
+        } else {
+            // Fallback to hardcoded packages
+            listOf(
+                CreditPackage("pack_test", 10, "0.001", "0.0001"),
+                CreditPackage("pack_1", 2000, "0.267", "0.000134"),
+                CreditPackage("pack_2", 5000, "0.533", "0.000107"),
+                CreditPackage("pack_3", 8000, "0.800", "0.0001")
+            )
+        }
     }
 
     // Sparkle rotation
@@ -83,10 +107,13 @@ fun Web3PaywallScreen(
     )
 
     // Select first package by default
-    LaunchedEffect(Unit) {
-        if (selectedPackageId == null) {
+    LaunchedEffect(creditPackages) {
+        if (selectedPackageId == null && creditPackages.isNotEmpty()) {
             onSelectPackage(creditPackages.first().id)
         }
+    }
+
+    LaunchedEffect(Unit) {
         animateContent = true
         delay(2000)
         showCloseButton = true
@@ -100,7 +127,6 @@ fun Web3PaywallScreen(
                     colors = listOf(ClawlyColors.background, ClawlyColors.surface)
                 )
             )
-            .navigationBarsPadding()
     ) {
         // Accent glow at top
         Box(
@@ -121,7 +147,7 @@ fun Web3PaywallScreen(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Close button row
+            // Top row with credits and close button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -129,8 +155,47 @@ fun Web3PaywallScreen(
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp)
                     .height(44.dp),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                // Credits display (left side)
+                AnimatedVisibility(
+                    visible = animateContent && isWalletConnected,
+                    enter = fadeIn()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(ClawlyColors.surfaceElevated)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "✦",
+                            fontSize = 14.sp,
+                            color = ClawlyColors.accentPrimary
+                        )
+                        Text(
+                            text = formatCredits(currentCredits),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ClawlyColors.textPrimary
+                        )
+                        Text(
+                            text = "credits",
+                            fontSize = 12.sp,
+                            color = ClawlyColors.secondaryText
+                        )
+                    }
+                }
+
+                // Spacer when credits not visible
+                if (!isWalletConnected) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+
+                // Close button (right side)
                 AnimatedVisibility(
                     visible = showCloseButton,
                     enter = fadeIn()
@@ -140,7 +205,7 @@ fun Web3PaywallScreen(
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onDismiss()
                         },
-                        enabled = !isPurchasing && !isConnecting,
+                        enabled = !isPurchasing && !isConnecting && !isWaitingForConfirmation,
                         modifier = Modifier.size(44.dp)
                     ) {
                         Box(
@@ -179,13 +244,13 @@ fun Web3PaywallScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Get",
+                        text = "Join",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = ClawlyColors.textPrimary
                     )
                     Text(
-                        text = "Clawly Credits",
+                        text = "Clawly AI",
                         fontSize = 28.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = ClawlyColors.accentPrimary
@@ -215,46 +280,78 @@ fun Web3PaywallScreen(
                 visible = animateContent,
                 enter = fadeIn() + slideInVertically { 30 }
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // First row - 2 packages
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                if (isLoadingOffers) {
+                    // Loading state
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        creditPackages.take(2).forEach { pkg ->
-                            CreditPackageCard(
-                                package_ = pkg,
-                                isSelected = selectedPackageId == pkg.id,
-                                isEnabled = isWalletConnected && !isPurchasing,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onSelectPackage(pkg.id)
-                                },
-                                modifier = Modifier.weight(1f)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                color = ClawlyColors.accentPrimary,
+                                strokeWidth = 3.dp
+                            )
+                            Text(
+                                text = "Loading offers...",
+                                fontSize = 14.sp,
+                                color = ClawlyColors.secondaryText
                             )
                         }
                     }
-                    // Second row - 2 packages
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        creditPackages.drop(2).forEach { pkg ->
-                            CreditPackageCard(
-                                package_ = pkg,
-                                isSelected = selectedPackageId == pkg.id,
-                                isEnabled = isWalletConnected && !isPurchasing,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onSelectPackage(pkg.id)
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
+                        // First row - 2 packages
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            creditPackages.take(2).forEach { pkg ->
+                                CreditPackageCard(
+                                    package_ = pkg,
+                                    isSelected = selectedPackageId == pkg.id,
+                                    isEnabled = !isPurchasing,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onSelectPackage(pkg.id)
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        // Second row - remaining packages
+                        if (creditPackages.size > 2) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                creditPackages.drop(2).take(2).forEach { pkg ->
+                                    CreditPackageCard(
+                                        package_ = pkg,
+                                        isSelected = selectedPackageId == pkg.id,
+                                        isEnabled = !isPurchasing,
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onSelectPackage(pkg.id)
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                // Add empty space if odd number of packages in second row
+                                if (creditPackages.drop(2).size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 }
@@ -268,6 +365,8 @@ fun Web3PaywallScreen(
                 isWalletConnected = isWalletConnected,
                 isConnecting = isConnecting,
                 isPurchasing = isPurchasing,
+                isWaitingForConfirmation = isWaitingForConfirmation,
+                isRestoringCredits = isRestoringCredits,
                 canPurchase = isWalletConnected && selectedPackageId != null,
                 animateContent = animateContent,
                 onConnectWallet = {
@@ -277,6 +376,21 @@ fun Web3PaywallScreen(
                 onPurchase = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onPurchase()
+                },
+                onRestoreCredits = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onRestoreCredits()
+                }
+            )
+        }
+
+        // Success overlay
+        if (purchaseSuccess) {
+            PurchaseSuccessOverlay(
+                creditsReceived = creditsReceived,
+                onDismiss = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSuccessDismiss()
                 }
             )
         }
@@ -407,13 +521,16 @@ private fun CreditPackageCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = "◎ ",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isEnabled) Color(0xFF9945FF)
-                           else Color(0xFF9945FF).copy(alpha = 0.5f)
+                Image(
+                    painter = painterResource(id = R.drawable.ic_solana),
+                    contentDescription = "SOL",
+                    modifier = Modifier
+                        .size(18.dp)
+                        .graphicsLayer {
+                            alpha = if (isEnabled) 1f else 0.5f
+                        }
                 )
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = package_.priceSol,
                     fontSize = 18.sp,
@@ -429,14 +546,6 @@ private fun CreditPackageCard(
                            else ClawlyColors.secondaryText.copy(alpha = 0.5f)
                 )
             }
-
-            // Price per credit
-            Text(
-                text = "◎${package_.pricePerCredit}/credit",
-                fontSize = 10.sp,
-                color = if (isEnabled) ClawlyColors.textTertiary
-                       else ClawlyColors.textTertiary.copy(alpha = 0.5f)
-            )
         }
 
         // Selection indicator - X in top right with offset
@@ -473,10 +582,13 @@ private fun Web3PaywallBottomSection(
     isWalletConnected: Boolean,
     isConnecting: Boolean,
     isPurchasing: Boolean,
+    isWaitingForConfirmation: Boolean,
+    isRestoringCredits: Boolean,
     canPurchase: Boolean,
     animateContent: Boolean,
     onConnectWallet: () -> Unit,
-    onPurchase: () -> Unit
+    onPurchase: () -> Unit,
+    onRestoreCredits: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -491,7 +603,8 @@ private fun Web3PaywallBottomSection(
                 )
             )
             .padding(horizontal = 24.dp)
-            .padding(bottom = 24.dp),
+            .navigationBarsPadding()
+            .padding(bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Connected wallet info
@@ -536,7 +649,7 @@ private fun Web3PaywallBottomSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
-                enabled = if (isWalletConnected) canPurchase && !isPurchasing else !isConnecting,
+                enabled = if (isWalletConnected) canPurchase && !isPurchasing && !isWaitingForConfirmation else !isConnecting,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ClawlyColors.accentPrimary,
                     disabledContainerColor = ClawlyColors.accentPrimary.copy(alpha = 0.5f)
@@ -547,19 +660,67 @@ private fun Web3PaywallBottomSection(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isConnecting || isPurchasing) {
+                    when {
+                        isConnecting || isPurchasing -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        }
+                        isWaitingForConfirmation -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                                Text(
+                                    text = "Confirming...",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        else -> {
+                            Text(
+                                text = if (isWalletConnected) "Purchase Credits" else "Connect Wallet",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Restore Credits button (when wallet connected)
+        if (isWalletConnected) {
+            Spacer(modifier = Modifier.height(2.dp))
+            AnimatedVisibility(
+                visible = animateContent,
+                enter = fadeIn()
+            ) {
+                TextButton(
+                    onClick = onRestoreCredits,
+                    enabled = !isPurchasing && !isWaitingForConfirmation && !isRestoringCredits
+                ) {
+                    if (isRestoringCredits) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = Color.White,
+                            modifier = Modifier.size(16.dp),
+                            color = ClawlyColors.accentPrimary,
                             strokeWidth = 2.dp
                         )
-                    } else {
-                        Text(
-                            text = if (isWalletConnected) "Purchase Credits" else "Connect Wallet",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
+                    Text(
+                        text = if (isRestoringCredits) "Restoring..." else "Restore Credits",
+                        fontSize = 14.sp,
+                        color = ClawlyColors.accentPrimary
+                    )
                 }
             }
         }
@@ -587,5 +748,115 @@ private fun shortenAddress(address: String): String {
         "${address.take(6)}...${address.takeLast(4)}"
     } else {
         address
+    }
+}
+
+private fun formatCredits(credits: Int): String {
+    return when {
+        credits >= 1_000_000 -> String.format("%.1fM", credits / 1_000_000.0)
+        credits >= 1_000 -> String.format("%.1fK", credits / 1_000.0)
+        else -> credits.toString()
+    }
+}
+
+@Composable
+private fun PurchaseSuccessOverlay(
+    creditsReceived: Int,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ClawlyColors.background.copy(alpha = 0.95f))
+            .clickable(enabled = false) { },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // Success icon with glow
+            Box(
+                contentAlignment = Alignment.Center
+            ) {
+                // Glow
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFF4CAF50).copy(alpha = 0.3f),
+                                    Color.Transparent
+                                )
+                            ),
+                            shape = CircleShape
+                        )
+                )
+                // Icon
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(Color(0xFF4CAF50), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Success",
+                        tint = Color.White,
+                        modifier = Modifier.size(48.dp)
+                    )
+                }
+            }
+
+            // Success text
+            Text(
+                text = "Purchase Successful!",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = ClawlyColors.textPrimary
+            )
+
+            // Credits received
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "+$creditsReceived",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = ClawlyColors.accentPrimary
+                )
+                Text(
+                    text = "credits added",
+                    fontSize = 16.sp,
+                    color = ClawlyColors.secondaryText
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Continue button
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = ClawlyColors.accentPrimary
+                ),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    text = "Continue",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }

@@ -38,4 +38,7 @@ interface AuthProviderRepository {
      * Returns true when approval call was attempted.
      */
     suspend fun tryApprovePendingPairingFromList(source: String, reconnectAfterApproval: Boolean = true): Boolean
+
+    /** Refresh managed instance status from server (call when screen appears) */
+    suspend fun refreshManagedInstanceStatus()
 }

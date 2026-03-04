@@ -3,6 +3,7 @@ package ai.clawly.app.presentation.settings
 import ai.clawly.app.BuildConfig
 import ai.clawly.app.domain.model.ConnectionStatus
 import ai.clawly.app.domain.model.HostingType
+import ai.clawly.app.presentation.common.SignInBottomSheet
 import ai.clawly.app.presentation.wallet.WalletViewModel
 import ai.clawly.app.ui.theme.ClawlyColors
 import ai.clawly.app.ui.util.DrawIfWeb2
@@ -265,7 +266,17 @@ fun FullSettingsScreen(
                         subtitle = "Get started with your AI assistant",
                         titleColor = ClawlyColors.accentPrimary,
                         onClick = {
-                            if (uiState.isPremium || uiState.allowSelfHostedWithoutPremium) {
+                            if (BuildConfig.IS_WEB2 && !uiState.isFirebaseSignedIn) {
+                                onNavigateToLogin()
+                            } else if (BuildConfig.IS_WEB3) {
+                                // Web3: wallet must be connected to set up managed hosting
+                                if (walletUiState.isWalletConnected) {
+                                    onNavigateToAuthProvider()
+                                } else {
+                                    onNavigateToPaywall()
+                                }
+                            } else if (uiState.isPremium || uiState.allowSelfHostedWithoutPremium) {
+                                // Web2: check subscription or remote config flag
                                 onNavigateToAuthProvider()
                             } else {
                                 onNavigateToPaywall()
@@ -312,6 +323,19 @@ fun FullSettingsScreen(
                         )
                         SettingsDivider()
 
+                        // Sign Message button (when has credits but no JWT)
+                        if (walletUiState.credits > 0 && !uiState.hasValidJwt) {
+                            SettingsRow(
+                                icon = Icons.Default.Edit,
+                                iconTint = ClawlyColors.warning,
+                                title = "Sign Message to Activate",
+                                subtitle = "Prove wallet ownership to use Clawly",
+                                titleColor = ClawlyColors.warning,
+                                onClick = { viewModel.showSignInSheet() }
+                            )
+                            SettingsDivider()
+                        }
+
                         // Buy Credits button
                         SettingsRow(
                             icon = Icons.Default.Add,
@@ -328,7 +352,10 @@ fun FullSettingsScreen(
                             iconTint = ClawlyColors.error,
                             title = "Disconnect Wallet",
                             titleColor = ClawlyColors.error,
-                            onClick = { walletViewModel.disconnectWallet() }
+                            onClick = {
+                                walletViewModel.disconnectWallet()
+                                viewModel.logout()
+                            }
                         )
                     } else {
                         // Not connected - only show connect button
@@ -587,6 +614,13 @@ fun FullSettingsScreen(
         )
     }
 
+    // Web3 Sign-In Bottom Sheet
+    SignInBottomSheet(
+        isVisible = uiState.showSignInSheet,
+        isSigning = uiState.isSigning,
+        onDismiss = { viewModel.hideSignInSheet() },
+        onSignClick = { viewModel.performSiwsSignIn() }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

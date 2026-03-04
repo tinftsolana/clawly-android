@@ -1,11 +1,16 @@
 package ai.clawly.app.presentation.settings
 
+import ai.clawly.app.BuildConfig
 import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.remote.ControlPlaneService.SolanaAuthRequiredException
 import ai.clawly.app.data.repository.AuthProviderRepositoryImpl
 import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.model.AuthProviderConfig
 import ai.clawly.app.domain.model.ManagedInstanceStatus
 import ai.clawly.app.domain.repository.AuthProviderRepository
+import ai.clawly.app.domain.repository.SolanaAuthRepository
+import ai.clawly.app.domain.repository.WalletRepository
+import ai.clawly.app.domain.usecase.ConnectWalletUseCase
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -30,14 +35,20 @@ data class AuthProviderUiState(
     val hasPremiumAccess: Boolean = false,
     // Self-hosted dialog pre-filled values
     val selfHostedUrl: String = "",
-    val selfHostedToken: String = ""
+    val selfHostedToken: String = "",
+    // Web3 SIWS sign-in
+    val showSignInSheet: Boolean = false,
+    val isSigning: Boolean = false
 )
 
 @HiltViewModel
 class AuthProviderViewModel @Inject constructor(
     private val repository: AuthProviderRepositoryImpl,
     private val preferences: GatewayPreferences,
-    private val purchaseService: PurchaseService
+    private val purchaseService: PurchaseService,
+    private val solanaAuthRepository: SolanaAuthRepository,
+    private val connectWalletUseCase: ConnectWalletUseCase,
+    private val walletRepository: WalletRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthProviderUiState())
@@ -70,9 +81,19 @@ class AuthProviderViewModel @Inject constructor(
     }
 
     private fun observePremiumStatus() {
-        viewModelScope.launch {
-            purchaseService.subscriptionStatus.collect { status ->
-                _uiState.update { it.copy(hasPremiumAccess = status.isActive) }
+        if (BuildConfig.IS_WEB3) {
+            // Web3: premium access = wallet connected with credits > 0
+            viewModelScope.launch {
+                walletRepository.creditsFlow.collect { credits ->
+                    _uiState.update { it.copy(hasPremiumAccess = credits > 0) }
+                }
+            }
+        } else {
+            // Web2: premium access = active subscription
+            viewModelScope.launch {
+                purchaseService.subscriptionStatus.collect { status ->
+                    _uiState.update { it.copy(hasPremiumAccess = status.isActive) }
+                }
             }
         }
     }
@@ -161,28 +182,36 @@ class AuthProviderViewModel @Inject constructor(
                     },
                     onFailure = { e ->
                         Log.e(TAG, "Instance creation failed", e)
-                        val errorMsg = e.message ?: "Failed to create instance"
-                        _uiState.update {
-                            it.copy(
-                                isCreatingInstance = false,
-                                error = errorMsg,
-                                showError = true
-                            )
+                        _uiState.update { it.copy(isCreatingInstance = false) }
+
+                        // Check if auth is required
+                        if (e is SolanaAuthRequiredException) {
+                            Log.d(TAG, "Solana auth required, showing sign-in sheet")
+                            _uiState.update { it.copy(showSignInSheet = true) }
+                        } else {
+                            val errorMsg = e.message ?: "Failed to create instance"
+                            _uiState.update {
+                                it.copy(error = errorMsg, showError = true)
+                            }
+                            onError(errorMsg)
                         }
-                        onError(errorMsg)
                     }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Unexpected error", e)
-                val errorMsg = e.message ?: "An unexpected error occurred"
-                _uiState.update {
-                    it.copy(
-                        isCreatingInstance = false,
-                        error = errorMsg,
-                        showError = true
-                    )
+                _uiState.update { it.copy(isCreatingInstance = false) }
+
+                // Check if auth is required
+                if (e is SolanaAuthRequiredException) {
+                    Log.d(TAG, "Solana auth required, showing sign-in sheet")
+                    _uiState.update { it.copy(showSignInSheet = true) }
+                } else {
+                    val errorMsg = e.message ?: "An unexpected error occurred"
+                    _uiState.update {
+                        it.copy(error = errorMsg, showError = true)
+                    }
+                    onError(errorMsg)
                 }
-                onError(errorMsg)
             }
         }
     }
@@ -206,5 +235,46 @@ class AuthProviderViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(showError = false, error = null) }
+    }
+
+    // MARK: - Web3 SIWS Sign-In
+
+    fun hideSignInSheet() {
+        _uiState.update { it.copy(showSignInSheet = false) }
+    }
+
+    /**
+     * Perform SIWS authentication, then retry the managed instance creation.
+     */
+    fun performSiwsSignIn(
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSigning = true) }
+
+            val walletAddress = walletRepository.publicKeyFlow.first()
+            if (walletAddress.isEmpty()) {
+                Log.e(TAG, "SIWS: No wallet connected")
+                _uiState.update { it.copy(isSigning = false, showSignInSheet = false) }
+                onError("Wallet not connected")
+                return@launch
+            }
+
+            Log.d(TAG, "SIWS: Starting authentication for ${walletAddress.take(8)}...")
+
+            solanaAuthRepository.authenticate(walletAddress) { message ->
+                connectWalletUseCase.signMessage(message)
+            }.onSuccess {
+                Log.d(TAG, "SIWS: Authentication successful, retrying instance creation")
+                _uiState.update { it.copy(isSigning = false, showSignInSheet = false) }
+                // Retry the managed instance creation
+                createManagedInstance(onSuccess, onError)
+            }.onFailure { e ->
+                Log.e(TAG, "SIWS: Authentication failed", e)
+                _uiState.update { it.copy(isSigning = false) }
+                onError(e.message ?: "Sign-in failed")
+            }
+        }
     }
 }

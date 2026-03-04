@@ -228,6 +228,10 @@ class ChatViewModel @Inject constructor(
                     }
                     is UserIdentity.NotAuthenticated -> {
                         Log.d(TAG, "User not authenticated")
+                        if (BuildConfig.IS_WEB3) {
+                            Log.d(TAG, "Web3 wallet disconnected, stopping gateway")
+                            gatewayConnectionUseCase.disconnect()
+                        }
                     }
                 }
             }

@@ -3,6 +3,7 @@ package ai.clawly.app.di
 import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.local.ChatPersistenceService
 import ai.clawly.app.data.preferences.GatewayPreferences
+import ai.clawly.app.data.preferences.SolanaAuthPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.repository.AuthProviderRepositoryImpl
 import ai.clawly.app.data.repository.ChatRepositoryImpl
@@ -40,9 +41,10 @@ object DataModule {
     @Singleton
     fun provideControlPlaneService(
         preferences: GatewayPreferences,
-        firebaseAuthService: FirebaseAuthService
+        firebaseAuthService: FirebaseAuthService,
+        solanaAuthPreferences: SolanaAuthPreferences
     ): ControlPlaneService {
-        return ControlPlaneService(preferences, firebaseAuthService)
+        return ControlPlaneService(preferences, firebaseAuthService, solanaAuthPreferences)
     }
 
     @Provides
