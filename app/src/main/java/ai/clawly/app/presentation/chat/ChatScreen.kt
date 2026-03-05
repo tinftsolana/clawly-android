@@ -38,6 +38,10 @@ import kotlinx.coroutines.flow.collectLatest
 import java.util.Locale
 import java.util.UUID
 
+private const val DEBUG_SOLANA_MCP_PROMPT = """
+Сделай перевод 10000 lamports с Z4aYdwpPZAsnGnC9EDpybQjsso1Sx4Evu26nQyAe2rd на 9k3roqmt1J32SHJ17KS9mZz7B4Cg8KBrRj1AFY4UWAcR через наш Solana MCP flow.
+"""
+
 @Composable
 fun ChatScreen(
     onNavigateToSettings: () -> Unit,
@@ -247,6 +251,9 @@ fun ChatScreen(
                 is ChatEvent.ShowError -> {
                     android.widget.Toast.makeText(context, "Error: ${event.message}", android.widget.Toast.LENGTH_SHORT).show()
                 }
+                is ChatEvent.ShowToast -> {
+                    android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
+                }
                 is ChatEvent.ScrollToBottom -> {
                     // Handled by auto-scroll
                 }
@@ -435,6 +442,10 @@ fun ChatScreen(
                         inputText = ""
                     }
                 },
+                onInsertDebugPrompt = {
+                    inputText = DEBUG_SOLANA_MCP_PROMPT.trim()
+                },
+                showDebugPromptButton = BuildConfig.DEBUG,
                 onAddAttachment = {
                     photoPickerLauncher.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -465,6 +476,44 @@ fun ChatScreen(
             title = { Text("Resolving Access") },
             text = {
                 Text("Gateway access is still being resolved. Please wait a few seconds, then send again.")
+            }
+        )
+    }
+
+    val pendingSignRequest = uiState.pendingSignRequest
+    if (pendingSignRequest != null) {
+        val title = "Sign Transaction"
+        val fromWallet = pendingSignRequest.fromWallet ?: pendingSignRequest.walletAddress ?: "-"
+        val toWallet = pendingSignRequest.toWallet ?: "-"
+        val txHash = pendingSignRequest.txHash ?: "-"
+
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissSignRequestPrompt() },
+            title = { Text(title) },
+            text = {
+                Text(
+                    "Request ID: ${pendingSignRequest.requestId}\n" +
+                            "From: $fromWallet\n" +
+                            "To: $toWallet\n" +
+                            "TxHash: $txHash\n\n" +
+                            "Sign this transaction in your wallet to continue."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.approvePendingSignRequest() },
+                    enabled = !uiState.isSubmittingSignRequest
+                ) {
+                    Text(if (uiState.isSubmittingSignRequest) "Signing..." else "Sign in Wallet")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.rejectPendingSignRequest() },
+                    enabled = !uiState.isSubmittingSignRequest
+                ) {
+                    Text("Reject")
+                }
             }
         )
     }

@@ -44,6 +44,8 @@ fun FloatingInputBar(
     value: String,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
+    onInsertDebugPrompt: () -> Unit = {},
+    showDebugPromptButton: Boolean = false,
     onAddAttachment: () -> Unit,
     onRemoveAttachment: (String) -> Unit,
     onAbort: () -> Unit,
@@ -116,6 +118,26 @@ fun FloatingInputBar(
             ) {
                 // Plus button for attachments (hidden when recording)
                 if (!isRecording) {
+                    if (showDebugPromptButton) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onInsertDebugPrompt()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "DBG",
+                                color = ClawlyColors.secondaryText,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .size(36.dp)

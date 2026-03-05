@@ -90,6 +90,21 @@ data class PairingDevicesResponse(
     val pairing: JsonElement? = null
 )
 
+@Serializable
+data class SignRequestResponse(
+    val requestId: String,
+    val walletAddress: String,
+    val unsignedTxBase64: String,
+    val txHash: String? = null,
+    val status: String,
+    val createdAt: Long? = null,
+    val expiresAt: Long? = null,
+    val signedTxBase64: String? = null,
+    val signature: String? = null,
+    val solanaSignature: String? = null,
+    val error: String? = null
+)
+
 /**
  * Service for interacting with the control plane API
  * Matches iOS ControlPlaneService.swift exactly
@@ -744,6 +759,101 @@ class ControlPlaneService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Get pairing devices error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get pending sign requests for authenticated wallet.
+     * GET /v2/sign-requests/pending
+     */
+    suspend fun getPendingSignRequests(userId: String? = null): Result<List<SignRequestResponse>> {
+        return try {
+            Log.d(TAG, "Fetching pending sign requests")
+            val response = client.get("$BASE_URL/v2/sign-requests/pending") {
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
+            }
+
+            if (response.status.isSuccess()) {
+                val items = response.body<List<SignRequestResponse>>()
+                Log.d(TAG, "Pending sign requests fetched: ${items.size}")
+                Result.success(items)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Get pending sign requests failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get pending sign requests error", e)
+            Result.failure(e)
+        }
+    }
+
+    // MARK: - Solana Sign Requests
+
+    /**
+     * Approve sign request with signed transaction payload.
+     * POST /v2/sign-requests/:requestId/approve
+     */
+    suspend fun approveSignRequest(
+        requestId: String,
+        signedTxBase64: String,
+        userId: String? = null
+    ): Result<Unit> {
+        return try {
+            Log.d(TAG, "Approving sign request: $requestId")
+
+            val response = client.post("$BASE_URL/v2/sign-requests/$requestId/approve") {
+                contentType(ContentType.Application.Json)
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
+                setBody(mapOf("signedTxBase64" to signedTxBase64))
+            }
+
+            if (response.status.isSuccess()) {
+                Log.d(TAG, "Sign request approved: $requestId")
+                Result.success(Unit)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Approve sign request failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Approve sign request error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Reject sign request.
+     * POST /v2/sign-requests/:requestId/reject
+     */
+    suspend fun rejectSignRequest(
+        requestId: String,
+        error: String? = null,
+        userId: String? = null
+    ): Result<Unit> {
+        return try {
+            Log.d(TAG, "Rejecting sign request: $requestId")
+
+            val response = client.post("$BASE_URL/v2/sign-requests/$requestId/reject") {
+                contentType(ContentType.Application.Json)
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
+                setBody(if (error.isNullOrBlank()) mapOf<String, String>() else mapOf("error" to error))
+            }
+
+            if (response.status.isSuccess()) {
+                Log.d(TAG, "Sign request rejected: $requestId")
+                Result.success(Unit)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Reject sign request failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Reject sign request error", e)
             Result.failure(e)
         }
     }

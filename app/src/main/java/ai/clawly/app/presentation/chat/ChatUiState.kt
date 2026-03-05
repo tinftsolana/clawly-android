@@ -21,7 +21,9 @@ data class ChatUiState(
     val pendingAttachments: List<PendingAttachment> = emptyList(),
     val isRecording: Boolean = false,
     val recordingRmsLevel: Float = 0f,
-    val partialRecognitionText: String = ""
+    val partialRecognitionText: String = "",
+    val pendingSignRequest: SolanaSignRequestUi? = null,
+    val isSubmittingSignRequest: Boolean = false
 ) {
     val isConnected: Boolean get() = connectionStatus == ConnectionStatus.Online
     val hasAuthProvider: Boolean get() = currentAuthProvider.isConfigured

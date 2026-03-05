@@ -6,6 +6,7 @@ import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.auth.FirebaseAuthState
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
+import ai.clawly.app.data.remote.SignRequestResponse
 import ai.clawly.app.data.remote.RemoteConfigFlags
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.remote.gateway.GatewayService
@@ -25,6 +26,7 @@ import ai.clawly.app.domain.usecase.WalletConnectionUseCase
 import ai.clawly.app.domain.usecase.Web3CreditsUseCase
 import com.revenuecat.purchases.Purchases
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -74,7 +76,12 @@ data class SettingsUiState(
     // Web3 SIWS sign-in
     val showSignInSheet: Boolean = false,
     val isSigning: Boolean = false,
-    val hasValidJwt: Boolean = false
+    val hasValidJwt: Boolean = false,
+    val isLoadingPendingSignRequests: Boolean = false,
+    val showPendingSignRequestsDialog: Boolean = false,
+    val pendingSignRequestsError: String? = null,
+    val pendingSignRequests: List<SignRequestResponse> = emptyList(),
+    val processingSignRequestId: String? = null
 ) {
     /** Format credits for display (e.g., 1,000,000 → "1.0M") */
     val creditsFormatted: String
@@ -639,6 +646,118 @@ class SettingsViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(showError = false, error = null) }
+    }
+
+    fun hidePendingSignRequestsDialog() {
+        _uiState.update { it.copy(showPendingSignRequestsDialog = false) }
+    }
+
+    fun fetchPendingSignRequests(showDialog: Boolean = true) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoadingPendingSignRequests = true,
+                    pendingSignRequestsError = null,
+                    showPendingSignRequestsDialog = showDialog || it.showPendingSignRequestsDialog
+                )
+            }
+
+            controlPlaneService.getPendingSignRequests(currentUserId).fold(
+                onSuccess = { requests ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingPendingSignRequests = false,
+                            pendingSignRequests = requests,
+                            pendingSignRequestsError = null
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingPendingSignRequests = false,
+                            pendingSignRequestsError = e.message ?: "Failed to load pending sign requests"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun approvePendingSignRequest(request: SignRequestResponse) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    processingSignRequestId = request.requestId,
+                    pendingSignRequestsError = null
+                )
+            }
+
+            try {
+                val unsignedTxBytes = Base64.decode(request.unsignedTxBase64, Base64.DEFAULT)
+                val signedTxBytes = connectWalletUseCase.signTransaction(unsignedTxBytes)
+                if (signedTxBytes == null) {
+                    _uiState.update {
+                        it.copy(
+                            processingSignRequestId = null,
+                            pendingSignRequestsError = "Wallet signature was cancelled or failed"
+                        )
+                    }
+                    return@launch
+                }
+
+                val signedTxBase64 = Base64.encodeToString(signedTxBytes, Base64.NO_WRAP)
+                controlPlaneService.approveSignRequest(
+                    requestId = request.requestId,
+                    signedTxBase64 = signedTxBase64,
+                    userId = currentUserId
+                ).onSuccess {
+                    _uiState.update { it.copy(processingSignRequestId = null) }
+                    fetchPendingSignRequests(showDialog = false)
+                }.onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            processingSignRequestId = null,
+                            pendingSignRequestsError = e.message ?: "Failed to approve sign request"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        processingSignRequestId = null,
+                        pendingSignRequestsError = e.message ?: "Failed to sign transaction"
+                    )
+                }
+            }
+        }
+    }
+
+    fun rejectPendingSignRequest(requestId: String) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    processingSignRequestId = requestId,
+                    pendingSignRequestsError = null
+                )
+            }
+
+            controlPlaneService.rejectSignRequest(
+                requestId = requestId,
+                error = "user_rejected_in_settings",
+                userId = currentUserId
+            ).onSuccess {
+                _uiState.update { it.copy(processingSignRequestId = null) }
+                fetchPendingSignRequests(showDialog = false)
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        processingSignRequestId = null,
+                        pendingSignRequestsError = e.message ?: "Failed to reject sign request"
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - Firebase Auth

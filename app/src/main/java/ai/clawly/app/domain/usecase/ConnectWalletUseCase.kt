@@ -243,6 +243,59 @@ class ConnectWalletUseCase @Inject constructor(
         }
     }
 
+    /**
+     * Sign a serialized Solana transaction without broadcasting it.
+     *
+     * @param serializedTransaction Base64-decoded transaction bytes
+     * @return Signed transaction bytes, or null if rejected/failed
+     */
+    suspend fun signTransaction(serializedTransaction: ByteArray): ByteArray? {
+        val sender = activityResultSender ?: run {
+            Log.e(TAG, "No activity result sender available")
+            return null
+        }
+
+        tryToRestoreAuthToken()
+
+        return (walletConnectionUseCase.walletDetails.firstOrNull() as? Connected)?.let { _ ->
+            Log.d(TAG, "Requesting wallet to sign transaction...")
+
+            val result = walletAdapter.transact(sender) { authResult ->
+                persistConnection(
+                    authResult.accounts.first().publicKey,
+                    authResult.accounts.first().accountLabel.orEmpty(),
+                    authResult.authToken
+                )
+
+                signTransactions(arrayOf(serializedTransaction))
+            }
+
+            when (result) {
+                is TransactionResult.Success -> {
+                    val signed = result.successPayload?.signedPayloads?.firstOrNull()
+                    if (signed != null) {
+                        Log.d(TAG, "Transaction signed successfully")
+                        signed
+                    } else {
+                        Log.e(TAG, "Transaction signed but payload missing")
+                        null
+                    }
+                }
+                is TransactionResult.Failure -> {
+                    Log.e(TAG, "Sign transaction failed: ${result.message}")
+                    null
+                }
+                is TransactionResult.NoWalletFound -> {
+                    Log.e(TAG, "No wallet found for transaction signing")
+                    null
+                }
+            }
+        } ?: run {
+            Log.e(TAG, "Wallet not connected")
+            null
+        }
+    }
+
     private suspend fun persistConnection(pubKey: ByteArray, accountLabel: String, token: String) {
         walletConnectionUseCase.persistConnection(
             SolanaPublicKey(pubKey).base58(),

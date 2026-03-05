@@ -21,7 +21,7 @@ private const val TAG = "SolanaApiService"
 class SolanaApiService @Inject constructor() {
 
     companion object {
-        const val BASE_URL = "http://157.245.185.252:3003"
+        const val BASE_URL = "http://157.245.185.252:3004"
     }
 
     private val json = Json {

@@ -323,6 +323,15 @@ fun FullSettingsScreen(
                         )
                         SettingsDivider()
 
+                        SettingsRow(
+                            icon = Icons.Default.List,
+                            iconTint = ClawlyColors.accentPrimary,
+                            title = "Pending Sign Requests",
+                            subtitle = "Check requests waiting for wallet signature",
+                            onClick = { viewModel.fetchPendingSignRequests(showDialog = true) }
+                        )
+                        SettingsDivider()
+
                         // Sign Message button (when has credits but no JWT)
                         if (walletUiState.credits > 0 && !uiState.hasValidJwt) {
                             SettingsRow(
@@ -621,6 +630,96 @@ fun FullSettingsScreen(
         onDismiss = { viewModel.hideSignInSheet() },
         onSignClick = { viewModel.performSiwsSignIn() }
     )
+
+    if (uiState.showPendingSignRequestsDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.hidePendingSignRequestsDialog() },
+            title = { Text("Pending Sign Requests") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (uiState.isLoadingPendingSignRequests) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = ClawlyColors.accentPrimary
+                            )
+                            Text("Loading...")
+                        }
+                    } else if (uiState.pendingSignRequestsError != null) {
+                        Text(
+                            text = uiState.pendingSignRequestsError ?: "Failed to load",
+                            color = ClawlyColors.error,
+                            fontSize = 14.sp
+                        )
+                    } else if (uiState.pendingSignRequests.isEmpty()) {
+                        Text(
+                            text = "No pending sign requests.",
+                            color = ClawlyColors.secondaryText,
+                            fontSize = 14.sp
+                        )
+                    } else {
+                        uiState.pendingSignRequests.forEach { req ->
+                            val processing = uiState.processingSignRequestId == req.requestId
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(ClawlyColors.surfaceElevated)
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("requestId: ${req.requestId}", fontSize = 12.sp, color = ClawlyColors.textPrimary)
+                                Text("status: ${req.status}", fontSize = 12.sp, color = ClawlyColors.secondaryText)
+                                if (!req.txHash.isNullOrBlank()) {
+                                    Text("txHash: ${req.txHash}", fontSize = 12.sp, color = ClawlyColors.secondaryText)
+                                }
+                                if (req.expiresAt != null) {
+                                    Text("expiresAt: ${req.expiresAt}", fontSize = 12.sp, color = ClawlyColors.secondaryText)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    TextButton(
+                                        onClick = { viewModel.approvePendingSignRequest(req) },
+                                        enabled = !processing && !uiState.isLoadingPendingSignRequests
+                                    ) {
+                                        Text(if (processing) "Signing..." else "Sign")
+                                    }
+                                    TextButton(
+                                        onClick = { viewModel.rejectPendingSignRequest(req.requestId) },
+                                        enabled = !processing && !uiState.isLoadingPendingSignRequests
+                                    ) {
+                                        Text("Reject", color = ClawlyColors.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.fetchPendingSignRequests(showDialog = false) }) {
+                    Text("Refresh")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.hidePendingSignRequestsDialog() }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -5,6 +5,7 @@ import ai.clawly.app.analytics.AmplitudeAnalyticsService
 import ai.clawly.app.data.auth.FirebaseAuthService
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.RemoteConfigFlags
+import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.remote.gateway.GatewayService
 import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.manager.SkillsManager
@@ -12,16 +13,32 @@ import ai.clawly.app.domain.model.*
 import ai.clawly.app.domain.repository.AuthProviderRepository
 import ai.clawly.app.domain.repository.ChatRepository
 import ai.clawly.app.domain.repository.AttachmentPayload
+import ai.clawly.app.domain.repository.SolanaAuthRepository
+import ai.clawly.app.domain.usecase.ConnectWalletUseCase
 import ai.clawly.app.domain.usecase.GatewayConnectionUseCase
 import ai.clawly.app.domain.usecase.GetUserIdentityUseCase
 import ai.clawly.app.domain.usecase.UserIdentity
 import ai.clawly.app.domain.usecase.Web3CreditsUseCase
 import android.util.Log
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import javax.inject.Inject
 
 private const val TAG = "ChatViewModel"
@@ -31,6 +48,7 @@ private const val PAIRING_ALERT_COOLDOWN_MS = 8_000L
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val gatewayService: GatewayService,
+    private val controlPlaneService: ControlPlaneService,
     private val chatRepository: ChatRepository,
     private val authProviderRepository: AuthProviderRepository,
     private val preferences: GatewayPreferences,
@@ -38,9 +56,11 @@ class ChatViewModel @Inject constructor(
     private val skillsManager: SkillsManager,
     private val getUserIdentityUseCase: GetUserIdentityUseCase,
     private val web3CreditsUseCase: Web3CreditsUseCase,
+    private val connectWalletUseCase: ConnectWalletUseCase,
     private val gatewayConnectionUseCase: GatewayConnectionUseCase,
     private val firebaseAuthService: FirebaseAuthService,
     private val purchaseService: PurchaseService,
+    private val solanaAuthRepository: SolanaAuthRepository,
     private val pendingMessageHolder: PendingMessageHolder
 ) : ViewModel() {
 
@@ -58,6 +78,10 @@ class ChatViewModel @Inject constructor(
     private var hasLoadedHistory = false
     private var pairingWarmupUntilMs: Long? = null
     private var lastPairingAlertAtMs: Long? = null
+    private var lastPresentedSignRequestId: String? = null
+    private val signWsClient by lazy { OkHttpClient() }
+    private var signWs: WebSocket? = null
+    private var signWsToken: String? = null
 
     val assistantName = "Clawly"
 
@@ -167,6 +191,9 @@ class ChatViewModel @Inject constructor(
                 if (status == ConnectionStatus.Online && wasOffline && !hasLoadedHistory) {
                     fetchChatHistory()
                 }
+                if (status == ConnectionStatus.Online) {
+                    syncPendingSignRequests()
+                }
             }
         }
 
@@ -225,9 +252,11 @@ class ChatViewModel @Inject constructor(
                 when (identity) {
                     is UserIdentity.Authenticated -> {
                         Log.d(TAG, "User authenticated: ${identity.userId}, isWeb3: ${identity.isWeb3}")
+                        if (identity.isWeb3) startSignRequestsSocket()
                     }
                     is UserIdentity.NotAuthenticated -> {
                         Log.d(TAG, "User not authenticated")
+                        stopSignRequestsSocket()
                         if (BuildConfig.IS_WEB3) {
                             Log.d(TAG, "Web3 wallet disconnected, stopping gateway")
                             gatewayConnectionUseCase.disconnect()
@@ -558,15 +587,18 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun handleIncomingMessage(message: GatewayMessage) {
+        val content = message.payload?.content
+
         _uiState.update {
             it.copy(isAssistantTyping = false, streamingContent = "")
         }
 
-        val content = message.payload?.content
         if (content.isNullOrEmpty()) {
             Log.d(TAG, "Received non-content message: ${message.type}")
             return
         }
+
+        maybeHandleIncomingSignRequest(content)
 
         maybeShowPairingResolvingPrompt(content)
 
@@ -581,6 +613,251 @@ class ChatViewModel @Inject constructor(
         // Emit speak event for TTS
         _events.emit(ChatEvent.SpeakText(content))
         _events.emit(ChatEvent.ScrollToBottom)
+    }
+
+    private suspend fun maybeHandleIncomingSignRequest(content: String) {
+        val signRequest = extractSignRequestFromJson(content) ?: extractSignRequestFromAssistantText(content)
+        if (signRequest == null) return
+        if (lastPresentedSignRequestId == signRequest.requestId) return
+
+        lastPresentedSignRequestId = signRequest.requestId
+        Log.d(TAG, "Detected sign request: ${signRequest.requestId}")
+        _uiState.update { it.copy(pendingSignRequest = signRequest, isSubmittingSignRequest = false) }
+        _events.emit(ChatEvent.ShowToast("Sign request received. Confirm in wallet."))
+    }
+
+    private fun startSignRequestsSocket() {
+        if (!BuildConfig.IS_WEB3) return
+
+        viewModelScope.launch {
+            val token = solanaAuthRepository.getValidToken()
+            if (token.isNullOrBlank()) {
+                Log.w(TAG, "sign-ws: missing Solana JWT, skip connect")
+                return@launch
+            }
+            if (signWs != null && signWsToken == token) return@launch
+
+            stopSignRequestsSocket()
+            signWsToken = token
+
+            val wsUrl = ControlPlaneService.BASE_URL
+                .replace("http://", "ws://")
+                .replace("https://", "wss://")
+                .trimEnd('/') + "/ws/sign-requests"
+
+            Log.d(TAG, "sign-ws: connecting to $wsUrl")
+            val request = Request.Builder()
+                .url(wsUrl)
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+
+            signWs = signWsClient.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    Log.d(TAG, "sign-ws: connected")
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    Log.d(TAG, "sign-ws: message ${text.take(300)}")
+                    viewModelScope.launch {
+                        handleSignSocketFrame(text)
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    Log.e(TAG, "sign-ws: failure ${t.message}")
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.d(TAG, "sign-ws: closed code=$code reason=$reason")
+                }
+            })
+        }
+    }
+
+    private fun stopSignRequestsSocket() {
+        signWs?.close(1000, "chat-viewmodel-stop")
+        signWs = null
+        signWsToken = null
+    }
+
+    private suspend fun handleSignSocketFrame(text: String) {
+        val obj = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+        when (obj["type"]?.jsonPrimitive?.contentOrNull) {
+            "authenticated" -> {
+                val wallet = obj["walletAddress"]?.jsonPrimitive?.contentOrNull
+                Log.d(TAG, "sign-ws: authenticated wallet=${wallet ?: "?"}")
+            }
+            "sign.request", "sign.status" -> {
+                val requestObj = obj["request"]?.let { it as? JsonObject } ?: return
+                handleSignSocketRequest(requestObj)
+            }
+            "sign.pending" -> {
+                val arr = obj["requests"]?.let { it as? JsonArray } ?: return
+                val first = arr.firstOrNull()?.let { it as? JsonObject } ?: return
+                handleSignSocketRequest(first)
+            }
+        }
+    }
+
+    private suspend fun handleSignSocketRequest(req: JsonObject) {
+        val signRequest = parseSignRequestObject(req) ?: return
+        if (signRequest.status != null && signRequest.status != "pending") {
+            val current = _uiState.value.pendingSignRequest
+            if (current?.requestId == signRequest.requestId) {
+                _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
+                _events.emit(ChatEvent.ShowToast("Sign request status: ${signRequest.status}"))
+            }
+            return
+        }
+
+        if (lastPresentedSignRequestId == signRequest.requestId) return
+        lastPresentedSignRequestId = signRequest.requestId
+        _uiState.update { it.copy(pendingSignRequest = signRequest, isSubmittingSignRequest = false) }
+        _events.emit(ChatEvent.ShowToast("Sign request received. Confirm in wallet."))
+    }
+
+    private fun syncPendingSignRequests() {
+        viewModelScope.launch {
+            val userId = (_userIdentity.value as? UserIdentity.Authenticated)?.userId ?: return@launch
+            controlPlaneService.getPendingSignRequests(userId).onSuccess { requests ->
+                val first = requests.firstOrNull() ?: return@onSuccess
+                val signRequest = SolanaSignRequestUi(
+                    requestId = first.requestId,
+                    unsignedTxBase64 = first.unsignedTxBase64,
+                    walletAddress = first.walletAddress,
+                    txHash = first.txHash,
+                    status = first.status,
+                    expiresAt = first.expiresAt
+                )
+                if (lastPresentedSignRequestId == signRequest.requestId) return@onSuccess
+                lastPresentedSignRequestId = signRequest.requestId
+                _uiState.update { it.copy(pendingSignRequest = signRequest, isSubmittingSignRequest = false) }
+            }
+        }
+    }
+
+    fun dismissSignRequestPrompt() {
+        _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
+    }
+
+    fun rejectPendingSignRequest() {
+        val signRequest = _uiState.value.pendingSignRequest ?: return
+        val userId = (_userIdentity.value as? UserIdentity.Authenticated)?.userId
+
+        _uiState.update { it.copy(isSubmittingSignRequest = true) }
+        viewModelScope.launch {
+            controlPlaneService.rejectSignRequest(
+                requestId = signRequest.requestId,
+                error = "user_rejected_on_android",
+                userId = userId
+            ).onSuccess {
+                _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
+                _events.emit(ChatEvent.ShowToast("Sign request rejected"))
+            }.onFailure { error ->
+                Log.e(TAG, "Reject sign request failed", error)
+                _uiState.update { it.copy(isSubmittingSignRequest = false) }
+                _events.emit(ChatEvent.ShowError(error.message ?: "Failed to reject sign request"))
+            }
+        }
+    }
+
+    fun approvePendingSignRequest() {
+        val signRequest = _uiState.value.pendingSignRequest ?: return
+        val userId = (_userIdentity.value as? UserIdentity.Authenticated)?.userId
+
+        _uiState.update { it.copy(isSubmittingSignRequest = true) }
+
+        viewModelScope.launch {
+            try {
+                val unsignedTxBytes = Base64.decode(signRequest.unsignedTxBase64, Base64.DEFAULT)
+                val signedTxBytes = connectWalletUseCase.signTransaction(unsignedTxBytes)
+                if (signedTxBytes == null) {
+                    _uiState.update { it.copy(isSubmittingSignRequest = false) }
+                    _events.emit(ChatEvent.ShowError("Wallet signature was cancelled or failed"))
+                    return@launch
+                }
+
+                val signedTxBase64 = Base64.encodeToString(signedTxBytes, Base64.NO_WRAP)
+                controlPlaneService.approveSignRequest(
+                    requestId = signRequest.requestId,
+                    signedTxBase64 = signedTxBase64,
+                    userId = userId
+                ).onSuccess {
+                    _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
+                    _events.emit(ChatEvent.ShowToast("Transaction sent to backend"))
+                }.onFailure { error ->
+                    Log.e(TAG, "Approve sign request failed", error)
+                    _uiState.update { it.copy(isSubmittingSignRequest = false) }
+                    _events.emit(ChatEvent.ShowError(error.message ?: "Failed to approve sign request"))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Approve sign request flow failed", e)
+                _uiState.update { it.copy(isSubmittingSignRequest = false) }
+                _events.emit(ChatEvent.ShowError(e.message ?: "Failed to sign transaction"))
+            }
+        }
+    }
+
+    private fun extractSignRequestFromJson(content: String): SolanaSignRequestUi? {
+        return runCatching {
+            val root = Json.parseToJsonElement(content).jsonObject
+            val req = root["request"]?.jsonObject ?: root
+            parseSignRequestObject(req)
+        }.getOrNull()
+    }
+
+    private fun parseSignRequestObject(req: JsonObject): SolanaSignRequestUi? {
+        val requestId = req["requestId"]?.jsonPrimitive?.contentOrNull ?: return null
+        val unsignedTxBase64 = req["unsignedTxBase64"]?.jsonPrimitive?.contentOrNull ?: return null
+
+        return SolanaSignRequestUi(
+            requestId = requestId,
+            unsignedTxBase64 = unsignedTxBase64,
+            walletAddress = req["walletAddress"]?.jsonPrimitive?.contentOrNull,
+            txHash = req["txHash"]?.jsonPrimitive?.contentOrNull,
+            status = req["status"]?.jsonPrimitive?.contentOrNull,
+            expiresAt = req["expiresAt"]?.jsonPrimitive?.longOrNull
+        )
+    }
+
+    private fun extractSignRequestFromAssistantText(text: String): SolanaSignRequestUi? {
+        val requestId = Regex("requestId:\\s*`([a-f0-9\\-]{36})`", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: return null
+
+        val unsignedTx = Regex("unsignedTxBase64:\\s*`([A-Za-z0-9+/=]+)`", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: return null
+
+        val fromWallet = Regex("from:\\s*`([^`]+)`", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+        val toWallet = Regex("to:\\s*`([^`]+)`", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+        val txHash = Regex("txHash:\\s*`([a-f0-9]+)`", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+        val status = Regex("status:\\s*`([^`]+)`", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+
+        return SolanaSignRequestUi(
+            requestId = requestId,
+            unsignedTxBase64 = unsignedTx,
+            fromWallet = fromWallet,
+            toWallet = toWallet,
+            txHash = txHash,
+            status = status
+        )
     }
 
     /**
@@ -762,5 +1039,12 @@ class ChatViewModel @Inject constructor(
         val text = _uiState.value.partialRecognitionText
         _uiState.update { it.copy(partialRecognitionText = "") }
         return text
+    }
+
+    override fun onCleared() {
+        stopSignRequestsSocket()
+        signWsClient.dispatcher.executorService.shutdown()
+        signWsClient.connectionPool.evictAll()
+        super.onCleared()
     }
 }
