@@ -790,6 +790,36 @@ class ControlPlaneService @Inject constructor(
         }
     }
 
+    /**
+     * Get sign request status/details.
+     * GET /v2/sign-requests/:requestId
+     */
+    suspend fun getSignRequestStatus(
+        requestId: String,
+        userId: String? = null
+    ): Result<SignRequestResponse> {
+        return try {
+            Log.d(TAG, "Fetching sign request status: $requestId")
+            val response = client.get("$BASE_URL/v2/sign-requests/$requestId") {
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
+            }
+
+            if (response.status.isSuccess()) {
+                val item = response.body<SignRequestResponse>()
+                Log.d(TAG, "Sign request status fetched: $requestId -> ${item.status}")
+                Result.success(item)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Get sign request status failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get sign request status error", e)
+            Result.failure(e)
+        }
+    }
+
     // MARK: - Solana Sign Requests
 
     /**

@@ -91,6 +91,11 @@ class ChatViewModel @Inject constructor(
     private val _web3Credits = MutableStateFlow(0)
     val web3Credits: StateFlow<Int> = _web3Credits.asStateFlow()
 
+    private companion object {
+        const val SIGN_STATUS_POLL_ATTEMPTS = 20
+        const val SIGN_STATUS_POLL_DELAY_MS = 1500L
+    }
+
     init {
         loadPersistedMessages()
         loadThinkingLevel()
@@ -785,6 +790,10 @@ class ChatViewModel @Inject constructor(
                 ).onSuccess {
                     _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
                     _events.emit(ChatEvent.ShowToast("Transaction sent to backend"))
+                    pollForSubmittedSignature(
+                        requestId = signRequest.requestId,
+                        userId = userId
+                    )
                 }.onFailure { error ->
                     Log.e(TAG, "Approve sign request failed", error)
                     _uiState.update { it.copy(isSubmittingSignRequest = false) }
@@ -795,6 +804,36 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { it.copy(isSubmittingSignRequest = false) }
                 _events.emit(ChatEvent.ShowError(e.message ?: "Failed to sign transaction"))
             }
+        }
+    }
+
+    private fun pollForSubmittedSignature(requestId: String, userId: String?) {
+        viewModelScope.launch {
+            repeat(SIGN_STATUS_POLL_ATTEMPTS) { idx ->
+                controlPlaneService.getSignRequestStatus(requestId, userId)
+                    .onSuccess { status ->
+                        val state = status.status.lowercase()
+                        val sig = status.solanaSignature
+
+                        if ((state == "submitted" || state == "confirmed") && !sig.isNullOrBlank()) {
+                            _events.emit(ChatEvent.ShowSignSuccess(sig, state))
+                            return@launch
+                        }
+
+                        if (state == "failed" || state == "rejected" || state == "expired") {
+                            val reason = status.error ?: state
+                            _events.emit(ChatEvent.ShowError("Sign request $state: $reason"))
+                            return@launch
+                        }
+                    }
+                    .onFailure { error ->
+                        Log.w(TAG, "Sign status poll failed [${idx + 1}/$SIGN_STATUS_POLL_ATTEMPTS]", error)
+                    }
+
+                delay(SIGN_STATUS_POLL_DELAY_MS)
+            }
+
+            _events.emit(ChatEvent.ShowToast("Signed. Waiting for network confirmation..."))
         }
     }
 

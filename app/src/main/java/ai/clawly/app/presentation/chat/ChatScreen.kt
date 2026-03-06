@@ -42,6 +42,10 @@ private const val DEBUG_SOLANA_MCP_PROMPT = """
 Сделай перевод 10000 lamports с Z4aYdwpPZAsnGnC9EDpybQjsso1Sx4Evu26nQyAe2rd на 9k3roqmt1J32SHJ17KS9mZz7B4Cg8KBrRj1AFY4UWAcR через наш Solana MCP flow.
 """
 
+private const val DEBUG_SOLANA_SWAP_PROMPT = """
+Сделай свап 0.0001 SOL в USDC через наш Solana MCP flow (Jupiter), используя default wallet.
+"""
+
 @Composable
 fun ChatScreen(
     onNavigateToSettings: () -> Unit,
@@ -55,6 +59,8 @@ fun ChatScreen(
 
     var inputText by remember { mutableStateOf("") }
     var showGatewayResolvingAlert by remember { mutableStateOf(false) }
+    var signSuccessSignature by remember { mutableStateOf<String?>(null) }
+    var signSuccessStatus by remember { mutableStateOf<String?>(null) }
 
     // Voice recording state
     var wantsRecording by remember { mutableStateOf(false) }
@@ -254,6 +260,10 @@ fun ChatScreen(
                 is ChatEvent.ShowToast -> {
                     android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
                 }
+                is ChatEvent.ShowSignSuccess -> {
+                    signSuccessSignature = event.signature
+                    signSuccessStatus = event.status
+                }
                 is ChatEvent.ScrollToBottom -> {
                     // Handled by auto-scroll
                 }
@@ -445,6 +455,9 @@ fun ChatScreen(
                 onInsertDebugPrompt = {
                     inputText = DEBUG_SOLANA_MCP_PROMPT.trim()
                 },
+                onInsertDebugSwapPrompt = {
+                    inputText = DEBUG_SOLANA_SWAP_PROMPT.trim()
+                },
                 showDebugPromptButton = BuildConfig.DEBUG,
                 onAddAttachment = {
                     photoPickerLauncher.launch(
@@ -513,6 +526,43 @@ fun ChatScreen(
                     enabled = !uiState.isSubmittingSignRequest
                 ) {
                     Text("Reject")
+                }
+            }
+        )
+    }
+
+    val successSignature = signSuccessSignature
+    if (successSignature != null) {
+        AlertDialog(
+            onDismissRequest = {
+                signSuccessSignature = null
+                signSuccessStatus = null
+            },
+            title = { Text("Transaction ${signSuccessStatus ?: "submitted"}") },
+            text = {
+                Text(
+                    "Signature:\n$successSignature\n\n" +
+                            "Open transaction in Solscan."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val url = "https://solscan.io/tx/$successSignature"
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }
+                ) {
+                    Text("Open in Solscan")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        signSuccessSignature = null
+                        signSuccessStatus = null
+                    }
+                ) {
+                    Text("Close")
                 }
             }
         )

@@ -45,6 +45,7 @@ fun FloatingInputBar(
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
     onInsertDebugPrompt: () -> Unit = {},
+    onInsertDebugSwapPrompt: () -> Unit = {},
     showDebugPromptButton: Boolean = false,
     onAddAttachment: () -> Unit,
     onRemoveAttachment: (String) -> Unit,
@@ -132,6 +133,24 @@ fun FloatingInputBar(
                         ) {
                             Text(
                                 text = "DBG",
+                                color = ClawlyColors.secondaryText,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onInsertDebugSwapPrompt()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "SWP",
                                 color = ClawlyColors.secondaryText,
                                 fontSize = 10.sp
                             )
