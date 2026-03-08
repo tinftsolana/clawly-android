@@ -26,9 +26,11 @@ data class ChatMessage(
     val isError: Boolean = false,
     val errorType: ChatErrorType = ChatErrorType.None,
     val isTyping: Boolean = false,
-    val attachments: List<MessageAttachment> = emptyList()
+    val attachments: List<MessageAttachment> = emptyList(),
+    val signRequestState: SignRequestBubbleState? = null
 ) {
     val isAssistant: Boolean get() = !isUser && !isError
+    val isSignRequest: Boolean get() = signRequestState != null
     val hasAttachments: Boolean get() = attachments.isNotEmpty()
 
     companion object {
@@ -54,6 +56,13 @@ data class ChatMessage(
             content = "",
             isUser = false,
             isTyping = true
+        )
+
+        fun signRequestMessage(state: SignRequestBubbleState) = ChatMessage(
+            id = "sign-request-${state.requestId}",
+            content = "",
+            isUser = false,
+            signRequestState = state
         )
     }
 }

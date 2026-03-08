@@ -10,6 +10,7 @@ import ai.clawly.app.data.remote.gateway.GatewayService
 import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.domain.manager.SkillsManager
 import ai.clawly.app.domain.model.*
+import ai.clawly.app.domain.model.SignRequestBubbleState
 import ai.clawly.app.domain.repository.AuthProviderRepository
 import ai.clawly.app.domain.repository.ChatRepository
 import ai.clawly.app.domain.repository.AttachmentPayload
@@ -82,6 +83,7 @@ class ChatViewModel @Inject constructor(
     private val signWsClient by lazy { OkHttpClient() }
     private var signWs: WebSocket? = null
     private var signWsToken: String? = null
+    private val pendingSignData = mutableMapOf<String, SolanaSignRequestUi>()
 
     val assistantName = "Clawly"
 
@@ -603,33 +605,72 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        maybeHandleIncomingSignRequest(content)
+        // Check if this is a pure sign request JSON — don't show as assistant text
+        val signRequest = extractSignRequestFromJson(content) ?: extractSignRequestFromAssistantText(content)
+        val isSignRequestOnly = extractSignRequestFromJson(content) != null
 
         maybeShowPairingResolvingPrompt(content)
 
         analytics.trackChatMessageReceived(type = message.type)
 
-        val assistantMessage = ChatMessage.assistantMessage(content)
-        val updatedMessages = _uiState.value.messages + assistantMessage
+        // Only add assistant message if it's NOT a pure sign-request JSON
+        if (!isSignRequestOnly) {
+            val assistantMessage = ChatMessage.assistantMessage(content)
+            val updatedMessages = _uiState.value.messages + assistantMessage
 
-        _uiState.update { it.copy(messages = updatedMessages) }
-        chatRepository.saveMessages(updatedMessages)
+            _uiState.update { it.copy(messages = updatedMessages) }
+            chatRepository.saveMessages(updatedMessages)
 
-        // Emit speak event for TTS
-        _events.emit(ChatEvent.SpeakText(content))
+            // Emit speak event for TTS
+            _events.emit(ChatEvent.SpeakText(content))
+        }
+
+        // Show sign request bubble AFTER assistant text
+        if (signRequest != null && lastPresentedSignRequestId != signRequest.requestId) {
+            lastPresentedSignRequestId = signRequest.requestId
+            pendingSignData[signRequest.requestId] = signRequest
+            Log.d(TAG, "Detected sign request: ${signRequest.requestId}")
+            upsertSignRequestMessage(
+                SignRequestBubbleState.ReadyToSign(
+                    requestId = signRequest.requestId,
+                    fromWallet = signRequest.fromWallet ?: signRequest.walletAddress,
+                    toWallet = signRequest.toWallet,
+                    txHash = signRequest.txHash
+                )
+            )
+        }
+
         _events.emit(ChatEvent.ScrollToBottom)
     }
 
-    private suspend fun maybeHandleIncomingSignRequest(content: String) {
-        val signRequest = extractSignRequestFromJson(content) ?: extractSignRequestFromAssistantText(content)
-        if (signRequest == null) return
-        if (lastPresentedSignRequestId == signRequest.requestId) return
-
-        lastPresentedSignRequestId = signRequest.requestId
-        Log.d(TAG, "Detected sign request: ${signRequest.requestId}")
-        _uiState.update { it.copy(pendingSignRequest = signRequest, isSubmittingSignRequest = false) }
-        _events.emit(ChatEvent.ShowToast("Sign request received. Confirm in wallet."))
+    private fun upsertSignRequestMessage(state: SignRequestBubbleState) {
+        val messageId = "sign-request-${state.requestId}"
+        _uiState.update { current ->
+            val existingIndex = current.messages.indexOfFirst { it.id == messageId }
+            val newMessage = ChatMessage.signRequestMessage(state)
+            val updatedMessages = if (existingIndex >= 0) {
+                current.messages.toMutableList().apply { set(existingIndex, newMessage) }
+            } else {
+                current.messages + newMessage
+            }
+            current.copy(messages = updatedMessages)
+        }
+        viewModelScope.launch {
+            chatRepository.saveMessages(_uiState.value.messages)
+            _events.emit(ChatEvent.ScrollToBottom)
+        }
     }
+
+    private fun findActiveSignRequest(): Pair<String, SolanaSignRequestUi>? {
+        val activeMessage = _uiState.value.messages
+            .lastOrNull { it.signRequestState is SignRequestBubbleState.ReadyToSign }
+            ?: return null
+        val requestId = activeMessage.signRequestState!!.requestId
+        val signData = pendingSignData[requestId] ?: return null
+        return requestId to signData
+    }
+
+    // Sign request detection is now handled inline in handleIncomingMessage()
 
     private fun startSignRequestsSocket() {
         if (!BuildConfig.IS_WEB3) return
@@ -707,18 +748,32 @@ class ChatViewModel @Inject constructor(
     private suspend fun handleSignSocketRequest(req: JsonObject) {
         val signRequest = parseSignRequestObject(req) ?: return
         if (signRequest.status != null && signRequest.status != "pending") {
-            val current = _uiState.value.pendingSignRequest
-            if (current?.requestId == signRequest.requestId) {
-                _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
+            // Status update for existing request
+            val messageId = "sign-request-${signRequest.requestId}"
+            val exists = _uiState.value.messages.any { it.id == messageId }
+            if (exists) {
                 _events.emit(ChatEvent.ShowToast("Sign request status: ${signRequest.status}"))
             }
             return
         }
 
         if (lastPresentedSignRequestId == signRequest.requestId) return
+
+        // Wait for assistant to finish typing before showing sign request
+        while (_uiState.value.isAssistantTyping) {
+            delay(200)
+        }
+
         lastPresentedSignRequestId = signRequest.requestId
-        _uiState.update { it.copy(pendingSignRequest = signRequest, isSubmittingSignRequest = false) }
-        _events.emit(ChatEvent.ShowToast("Sign request received. Confirm in wallet."))
+        pendingSignData[signRequest.requestId] = signRequest
+        upsertSignRequestMessage(
+            SignRequestBubbleState.ReadyToSign(
+                requestId = signRequest.requestId,
+                fromWallet = signRequest.fromWallet ?: signRequest.walletAddress,
+                toWallet = signRequest.toWallet,
+                txHash = signRequest.txHash
+            )
+        )
     }
 
     private fun syncPendingSignRequests() {
@@ -736,78 +791,116 @@ class ChatViewModel @Inject constructor(
                 )
                 if (lastPresentedSignRequestId == signRequest.requestId) return@onSuccess
                 lastPresentedSignRequestId = signRequest.requestId
-                _uiState.update { it.copy(pendingSignRequest = signRequest, isSubmittingSignRequest = false) }
+                pendingSignData[signRequest.requestId] = signRequest
+                upsertSignRequestMessage(
+                    SignRequestBubbleState.ReadyToSign(
+                        requestId = signRequest.requestId,
+                        fromWallet = signRequest.walletAddress,
+                        toWallet = null,
+                        txHash = signRequest.txHash
+                    )
+                )
             }
         }
     }
 
-    fun dismissSignRequestPrompt() {
-        _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
-    }
-
-    fun rejectPendingSignRequest() {
-        val signRequest = _uiState.value.pendingSignRequest ?: return
+    fun rejectSignRequest() {
+        val (requestId, signData) = findActiveSignRequest() ?: return
         val userId = (_userIdentity.value as? UserIdentity.Authenticated)?.userId
 
-        _uiState.update { it.copy(isSubmittingSignRequest = true) }
         viewModelScope.launch {
             controlPlaneService.rejectSignRequest(
-                requestId = signRequest.requestId,
+                requestId = requestId,
                 error = "user_rejected_on_android",
                 userId = userId
             ).onSuccess {
-                _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
-                _events.emit(ChatEvent.ShowToast("Sign request rejected"))
+                upsertSignRequestMessage(
+                    SignRequestBubbleState.Rejected(
+                        requestId = requestId,
+                        fromWallet = signData.fromWallet ?: signData.walletAddress,
+                        toWallet = signData.toWallet,
+                        txHash = signData.txHash,
+                        reason = "Transaction rejected"
+                    )
+                )
+                pendingSignData.remove(requestId)
             }.onFailure { error ->
                 Log.e(TAG, "Reject sign request failed", error)
-                _uiState.update { it.copy(isSubmittingSignRequest = false) }
                 _events.emit(ChatEvent.ShowError(error.message ?: "Failed to reject sign request"))
             }
         }
     }
 
-    fun approvePendingSignRequest() {
-        val signRequest = _uiState.value.pendingSignRequest ?: return
+    fun approveSignRequest() {
+        val (requestId, signData) = findActiveSignRequest() ?: return
         val userId = (_userIdentity.value as? UserIdentity.Authenticated)?.userId
 
-        _uiState.update { it.copy(isSubmittingSignRequest = true) }
+        upsertSignRequestMessage(
+            SignRequestBubbleState.Signing(
+                requestId = requestId,
+                fromWallet = signData.fromWallet ?: signData.walletAddress,
+                toWallet = signData.toWallet,
+                txHash = signData.txHash
+            )
+        )
 
         viewModelScope.launch {
             try {
-                val unsignedTxBytes = Base64.decode(signRequest.unsignedTxBase64, Base64.DEFAULT)
+                val unsignedTxBytes = Base64.decode(signData.unsignedTxBase64, Base64.DEFAULT)
                 val signedTxBytes = connectWalletUseCase.signTransaction(unsignedTxBytes)
                 if (signedTxBytes == null) {
-                    _uiState.update { it.copy(isSubmittingSignRequest = false) }
-                    _events.emit(ChatEvent.ShowError("Wallet signature was cancelled or failed"))
+                    upsertSignRequestMessage(
+                        SignRequestBubbleState.Rejected(
+                            requestId = requestId,
+                            fromWallet = signData.fromWallet ?: signData.walletAddress,
+                            toWallet = signData.toWallet,
+                            txHash = signData.txHash,
+                            reason = "Wallet signature cancelled"
+                        )
+                    )
+                    pendingSignData.remove(requestId)
                     return@launch
                 }
 
                 val signedTxBase64 = Base64.encodeToString(signedTxBytes, Base64.NO_WRAP)
                 controlPlaneService.approveSignRequest(
-                    requestId = signRequest.requestId,
+                    requestId = requestId,
                     signedTxBase64 = signedTxBase64,
                     userId = userId
                 ).onSuccess {
-                    _uiState.update { it.copy(pendingSignRequest = null, isSubmittingSignRequest = false) }
-                    _events.emit(ChatEvent.ShowToast("Transaction sent to backend"))
-                    pollForSubmittedSignature(
-                        requestId = signRequest.requestId,
-                        userId = userId
-                    )
+//                    _events.emit(ChatEvent.ShowToast("Transaction sent to backend"))
+                    pollForSubmittedSignature(requestId = requestId, userId = userId)
                 }.onFailure { error ->
                     Log.e(TAG, "Approve sign request failed", error)
-                    _uiState.update { it.copy(isSubmittingSignRequest = false) }
-                    _events.emit(ChatEvent.ShowError(error.message ?: "Failed to approve sign request"))
+                    upsertSignRequestMessage(
+                        SignRequestBubbleState.Rejected(
+                            requestId = requestId,
+                            fromWallet = signData.fromWallet ?: signData.walletAddress,
+                            toWallet = signData.toWallet,
+                            txHash = signData.txHash,
+                            reason = error.message ?: "Failed to approve"
+                        )
+                    )
+                    pendingSignData.remove(requestId)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Approve sign request flow failed", e)
-                _uiState.update { it.copy(isSubmittingSignRequest = false) }
-                _events.emit(ChatEvent.ShowError(e.message ?: "Failed to sign transaction"))
+                upsertSignRequestMessage(
+                    SignRequestBubbleState.Rejected(
+                        requestId = requestId,
+                        fromWallet = signData.fromWallet ?: signData.walletAddress,
+                        toWallet = signData.toWallet,
+                        txHash = signData.txHash,
+                        reason = e.message ?: "Signing failed"
+                    )
+                )
+                pendingSignData.remove(requestId)
             }
         }
     }
 
     private fun pollForSubmittedSignature(requestId: String, userId: String?) {
+        val signData = pendingSignData[requestId]
         viewModelScope.launch {
             repeat(SIGN_STATUS_POLL_ATTEMPTS) { idx ->
                 controlPlaneService.getSignRequestStatus(requestId, userId)
@@ -816,13 +909,32 @@ class ChatViewModel @Inject constructor(
                         val sig = status.solanaSignature
 
                         if ((state == "submitted" || state == "confirmed") && !sig.isNullOrBlank()) {
-                            _events.emit(ChatEvent.ShowSignSuccess(sig, state))
+                            upsertSignRequestMessage(
+                                SignRequestBubbleState.Success(
+                                    requestId = requestId,
+                                    fromWallet = signData?.fromWallet ?: signData?.walletAddress,
+                                    toWallet = signData?.toWallet,
+                                    txHash = signData?.txHash,
+                                    signature = sig,
+                                    status = state
+                                )
+                            )
+                            pendingSignData.remove(requestId)
                             return@launch
                         }
 
                         if (state == "failed" || state == "rejected" || state == "expired") {
                             val reason = status.error ?: state
-                            _events.emit(ChatEvent.ShowError("Sign request $state: $reason"))
+                            upsertSignRequestMessage(
+                                SignRequestBubbleState.Rejected(
+                                    requestId = requestId,
+                                    fromWallet = signData?.fromWallet ?: signData?.walletAddress,
+                                    toWallet = signData?.toWallet,
+                                    txHash = signData?.txHash,
+                                    reason = "Sign request $state: $reason"
+                                )
+                            )
+                            pendingSignData.remove(requestId)
                             return@launch
                         }
                     }

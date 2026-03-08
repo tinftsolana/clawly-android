@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ai.clawly.app.BuildConfig
 import ai.clawly.app.R
 import ai.clawly.app.ui.theme.ClawlyColors
 import kotlinx.coroutines.delay
@@ -388,27 +390,53 @@ private fun OnboardingPage2() {
             visible = showContent,
             enter = fadeIn()
         ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FloatingChip("\uD83D\uDCBB", "Code", 0.0, chipsFloating)
-                    FloatingChip("\uD83D\uDCE7", "Emails", 0.3, chipsFloating)
-                    FloatingChip("\uD83D\uDCC5", "Calendar", 0.6, chipsFloating)
+            if (BuildConfig.IS_WEB3) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("", "Send SOL", 0.0, chipsFloating, iconRes = R.drawable.ic_solana)
+                        FloatingChip("\uD83D\uDD04", "Swap", 0.3, chipsFloating)
+                        FloatingChip("\uD83D\uDCB0", "Lend USDT", 0.6, chipsFloating)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("\uD83C\uDFE6", "Borrow", 0.8, chipsFloating)
+                        FloatingChip("\uD83E\uDD16", "Auto Trade", 0.2, chipsFloating)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("\uD83D\uDCCA", "Portfolio", 0.5, chipsFloating)
+                        FloatingChip("\uD83D\uDD25", "DeFi", 0.4, chipsFloating)
+                        FloatingChip("\uD83D\uDCB8", "Stake", 0.7, chipsFloating)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("\uD83D\uDCC8", "Analytics", 0.1, chipsFloating)
+                        FloatingChip("✨", "& More", 0.9, chipsFloating)
+                    }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FloatingChip("✈\uFE0F", "Travel", 0.8, chipsFloating)
-                    FloatingChip("\uD83D\uDCDD", "Writing", 0.2, chipsFloating)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FloatingChip("\uD83C\uDF99\uFE0F", "Voice", 0.5, chipsFloating)
-                    FloatingChip("\uD83E\uDDEE", "Math", 0.4, chipsFloating)
-                    FloatingChip("\uD83C\uDFA8", "Creative", 0.7, chipsFloating)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FloatingChip("\uD83D\uDCCA", "Research", 0.1, chipsFloating)
-                    FloatingChip("✨", "& More", 0.9, chipsFloating)
+            } else {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("\uD83D\uDCBB", "Code", 0.0, chipsFloating)
+                        FloatingChip("\uD83D\uDCE7", "Emails", 0.3, chipsFloating)
+                        FloatingChip("\uD83D\uDCC5", "Calendar", 0.6, chipsFloating)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("✈\uFE0F", "Travel", 0.8, chipsFloating)
+                        FloatingChip("\uD83D\uDCDD", "Writing", 0.2, chipsFloating)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("\uD83C\uDF99\uFE0F", "Voice", 0.5, chipsFloating)
+                        FloatingChip("\uD83E\uDDEE", "Math", 0.4, chipsFloating)
+                        FloatingChip("\uD83C\uDFA8", "Creative", 0.7, chipsFloating)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FloatingChip("\uD83D\uDCCA", "Research", 0.1, chipsFloating)
+                        FloatingChip("✨", "& More", 0.9, chipsFloating)
+                    }
                 }
             }
         }
@@ -422,7 +450,8 @@ private fun FloatingChip(
     emoji: String,
     text: String,
     delayFraction: Double,
-    isFloating: Boolean
+    isFloating: Boolean,
+    iconRes: Int? = null
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "chip_$text")
     val offset by infiniteTransition.animateFloat(
@@ -446,7 +475,15 @@ private fun FloatingChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(text = emoji, fontSize = 16.sp)
+        if (iconRes != null) {
+            Image(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+        } else {
+            Text(text = emoji, fontSize = 16.sp)
+        }
         Text(
             text = text,
             fontSize = 14.sp,
@@ -523,7 +560,16 @@ private fun OnboardingPage3() {
 
 @Composable
 private fun ChatDemo() {
-    val chatCases = listOf(
+    val chatCases = if (BuildConfig.IS_WEB3) listOf(
+        Triple("Send", "Send 2 SOL to Alex", "Sent 2 SOL to Alex.sol \u2705"),
+        Triple("Swap", "Swap 10 USDC to SOL", "Swapped 10 USDC \u2192 0.058 SOL on Jupiter."),
+        Triple("Lend", "Lend 500 USDT on Kamino", "Deposited 500 USDT at 8.2% APY."),
+        Triple("Borrow", "Borrow SOL against USDC", "Borrowed 5 SOL, collateral: 800 USDC."),
+        Triple("Auto Trade", "DCA $50 into SOL weekly", "Set up: $50 \u2192 SOL every Monday."),
+        Triple("Stake", "Stake my SOL", "Staked 20 SOL with Marinade, 7.1% APY."),
+        Triple("Portfolio", "Show my portfolio", "SOL: $2,340 \u2022 USDC: $500 \u2022 JUP: $120"),
+        Triple("DeFi", "Best yield on USDT?", "Kamino 8.2% \u2022 MarginFi 7.8% \u2022 Drift 7.5%")
+    ) else listOf(
         Triple("Emails", "Check my emails", "Found 3 unread from your boss about Q4."),
         Triple("Calendar", "What's on today?", "Standup at 10am, design review at 3pm."),
         Triple("Writing", "Write a tweet", "\"Excited to share our new feature! \uD83D\uDE80\""),
@@ -757,8 +803,32 @@ private fun ChatDemo() {
 
 @Composable
 private fun InfiniteScrollRow() {
-    // 40 features for infinite scroll
-    val items = listOf(
+    val items = if (BuildConfig.IS_WEB3) listOf(
+        "◎ Send SOL",
+        "\uD83D\uDD04 Token Swap",
+        "\uD83D\uDCB0 Lend USDT",
+        "\uD83C\uDFE6 Borrow",
+        "\uD83E\uDD16 Auto Trade",
+        "\uD83D\uDCC8 DCA",
+        "\uD83D\uDD25 DeFi Yield",
+        "\uD83D\uDCB8 Stake SOL",
+        "\uD83D\uDCCA Portfolio",
+        "\uD83D\uDCC9 Analytics",
+        "\uD83D\uDD0D Token Info",
+        "\uD83D\uDCB1 Price Alerts",
+        "\uD83E\uDE99 NFTs",
+        "⚡ Jupiter",
+        "\uD83C\uDF0A Marinade",
+        "\uD83D\uDEE1\uFE0F MarginFi",
+        "\uD83C\uDFAF Drift",
+        "\uD83D\uDD11 Wallet",
+        "\uD83D\uDCDC TX History",
+        "\uD83D\uDCC0 Airdrop Check",
+        "\uD83E\uDDD1\u200D\uD83D\uDCBB Sniper",
+        "\uD83C\uDF1F Memecoins",
+        "\uD83D\uDD17 On-Chain",
+        "\uD83E\uDDE0 AI Signals"
+    ) else listOf(
         "⚡ Skills",
         "\uD83D\uDD27 MCP Tools",
         "\uD83D\uDCC5 Meetings",

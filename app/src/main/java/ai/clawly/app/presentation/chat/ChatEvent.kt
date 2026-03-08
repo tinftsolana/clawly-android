@@ -11,7 +11,7 @@ sealed class ChatEvent {
     data object ShowGatewayResolvingAlert : ChatEvent()
     data class ShowError(val message: String) : ChatEvent()
     data class ShowToast(val message: String) : ChatEvent()
-    data class ShowSignSuccess(val signature: String, val status: String) : ChatEvent()
+    // Sign success is now shown inline in chat messages
     data object ScrollToBottom : ChatEvent()
     data object MessageSent : ChatEvent()
     data class SpeakText(val text: String) : ChatEvent()

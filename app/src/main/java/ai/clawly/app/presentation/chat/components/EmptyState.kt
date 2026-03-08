@@ -1,5 +1,6 @@
 package ai.clawly.app.presentation.chat.components
 
+import ai.clawly.app.BuildConfig
 import ai.clawly.app.R
 import ai.clawly.app.ui.theme.ClawlyColors
 import androidx.compose.animation.*
@@ -153,77 +154,53 @@ private fun FloatingSuggestionChips(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.padding(horizontal = 24.dp)
     ) {
-        // Row 1: Code, Transcribe
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FloatingChip(
-                emoji = "💻",
-                text = "Write code",
-                delay = 0.0,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("Help me write some code") }
-            )
-            FloatingChip(
-                emoji = "🎙️",
-                text = "Transcribe",
-                delay = 0.3,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("Transcribe my voice memo") }
-            )
-        }
-
-        // Row 2: Emails, Travel
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FloatingChip(
-                emoji = "✉️",
-                text = "Emails",
-                delay = 0.5,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("Summarize my unread emails") }
-            )
-            FloatingChip(
-                emoji = "✈️",
-                text = "Travel",
-                delay = 0.2,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("Book hotels & flights") }
-            )
-        }
-
-        // Row 3: Calendar, Draft
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FloatingChip(
-                emoji = "📅",
-                text = "Calendar",
-                delay = 0.7,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("What's on my calendar today?") }
-            )
-            FloatingChip(
-                emoji = "📝",
-                text = "Draft",
-                delay = 0.4,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("Draft a professional email") }
-            )
-        }
-
-        // Row 4: Research
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FloatingChip(
-                emoji = "🔍",
-                text = "Research",
-                delay = 0.6,
-                isFloating = chipsFloating,
-                onClick = { onSuggestionClick("Help me research a topic") }
-            )
+        if (BuildConfig.IS_WEB3) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("", "Send SOL", 0.0, chipsFloating,
+                    onClick = { onSuggestionClick("Send 2 SOL to Alex") },
+                    iconRes = R.drawable.ic_solana)
+                FloatingChip("\uD83D\uDD04", "Swap", 0.3, chipsFloating,
+                    onClick = { onSuggestionClick("Swap 10 USDC to SOL") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("\uD83D\uDCB0", "Lend USDT", 0.5, chipsFloating,
+                    onClick = { onSuggestionClick("Lend 500 USDT on Kamino") })
+                FloatingChip("\uD83C\uDFE6", "Borrow", 0.2, chipsFloating,
+                    onClick = { onSuggestionClick("Borrow SOL against my USDC") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("\uD83E\uDD16", "Auto Trade", 0.7, chipsFloating,
+                    onClick = { onSuggestionClick("DCA \$50 into SOL weekly") })
+                FloatingChip("\uD83D\uDCB8", "Stake", 0.4, chipsFloating,
+                    onClick = { onSuggestionClick("Stake my SOL for best yield") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("\uD83D\uDCC8", "Portfolio", 0.6, chipsFloating,
+                    onClick = { onSuggestionClick("Show my portfolio and balances") })
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("\uD83D\uDCBB", "Write code", 0.0, chipsFloating,
+                    onClick = { onSuggestionClick("Help me write some code") })
+                FloatingChip("\uD83C\uDF99\uFE0F", "Transcribe", 0.3, chipsFloating,
+                    onClick = { onSuggestionClick("Transcribe my voice memo") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("✉\uFE0F", "Emails", 0.5, chipsFloating,
+                    onClick = { onSuggestionClick("Summarize my unread emails") })
+                FloatingChip("✈\uFE0F", "Travel", 0.2, chipsFloating,
+                    onClick = { onSuggestionClick("Book hotels & flights") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("\uD83D\uDCC5", "Calendar", 0.7, chipsFloating,
+                    onClick = { onSuggestionClick("What's on my calendar today?") })
+                FloatingChip("\uD83D\uDCDD", "Draft", 0.4, chipsFloating,
+                    onClick = { onSuggestionClick("Draft a professional email") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingChip("\uD83D\uDD0D", "Research", 0.6, chipsFloating,
+                    onClick = { onSuggestionClick("Help me research a topic") })
+            }
         }
     }
 }
@@ -234,7 +211,8 @@ private fun FloatingChip(
     text: String,
     delay: Double,
     isFloating: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    iconRes: Int? = null
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -269,10 +247,18 @@ private fun FloatingChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(
-            text = emoji,
-            fontSize = 16.sp
-        )
+        if (iconRes != null) {
+            Image(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+        } else {
+            Text(
+                text = emoji,
+                fontSize = 16.sp
+            )
+        }
         Text(
             text = text,
             color = ClawlyColors.textPrimary,

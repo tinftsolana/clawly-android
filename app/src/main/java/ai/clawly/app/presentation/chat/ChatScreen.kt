@@ -59,8 +59,7 @@ fun ChatScreen(
 
     var inputText by remember { mutableStateOf("") }
     var showGatewayResolvingAlert by remember { mutableStateOf(false) }
-    var signSuccessSignature by remember { mutableStateOf<String?>(null) }
-    var signSuccessStatus by remember { mutableStateOf<String?>(null) }
+    // Sign request state is now handled inline via message bubbles
 
     // Voice recording state
     var wantsRecording by remember { mutableStateOf(false) }
@@ -260,10 +259,7 @@ fun ChatScreen(
                 is ChatEvent.ShowToast -> {
                     android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
                 }
-                is ChatEvent.ShowSignSuccess -> {
-                    signSuccessSignature = event.signature
-                    signSuccessStatus = event.status
-                }
+                // ShowSignSuccess removed — handled inline via message bubbles
                 is ChatEvent.ScrollToBottom -> {
                     // Handled by auto-scroll
                 }
@@ -353,6 +349,12 @@ fun ChatScreen(
                     onRetry = { viewModel.retryLastMessage() },
                     onReconnect = { viewModel.reconnect() },
                     onTopUpCreditsClick = onNavigateToPaywall,
+                    onSignRequest = { viewModel.approveSignRequest() },
+                    onRejectSignRequest = { viewModel.rejectSignRequest() },
+                    onOpenSolscan = { signature ->
+                        val url = "https://solscan.io/tx/$signature"
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    },
                     listState = listState,
                     contentPadding = PaddingValues(
                         top = topBarHeight + 48.dp,
@@ -493,78 +495,5 @@ fun ChatScreen(
         )
     }
 
-    val pendingSignRequest = uiState.pendingSignRequest
-    if (pendingSignRequest != null) {
-        val title = "Sign Transaction"
-        val fromWallet = pendingSignRequest.fromWallet ?: pendingSignRequest.walletAddress ?: "-"
-        val toWallet = pendingSignRequest.toWallet ?: "-"
-        val txHash = pendingSignRequest.txHash ?: "-"
-
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissSignRequestPrompt() },
-            title = { Text(title) },
-            text = {
-                Text(
-                    "Request ID: ${pendingSignRequest.requestId}\n" +
-                            "From: $fromWallet\n" +
-                            "To: $toWallet\n" +
-                            "TxHash: $txHash\n\n" +
-                            "Sign this transaction in your wallet to continue."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { viewModel.approvePendingSignRequest() },
-                    enabled = !uiState.isSubmittingSignRequest
-                ) {
-                    Text(if (uiState.isSubmittingSignRequest) "Signing..." else "Sign in Wallet")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.rejectPendingSignRequest() },
-                    enabled = !uiState.isSubmittingSignRequest
-                ) {
-                    Text("Reject")
-                }
-            }
-        )
-    }
-
-    val successSignature = signSuccessSignature
-    if (successSignature != null) {
-        AlertDialog(
-            onDismissRequest = {
-                signSuccessSignature = null
-                signSuccessStatus = null
-            },
-            title = { Text("Transaction ${signSuccessStatus ?: "submitted"}") },
-            text = {
-                Text(
-                    "Signature:\n$successSignature\n\n" +
-                            "Open transaction in Solscan."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val url = "https://solscan.io/tx/$successSignature"
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    }
-                ) {
-                    Text("Open in Solscan")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        signSuccessSignature = null
-                        signSuccessStatus = null
-                    }
-                ) {
-                    Text("Close")
-                }
-            }
-        )
-    }
+    // Sign request and success dialogs removed — now handled inline via SignRequestBubble in MessageList
 }

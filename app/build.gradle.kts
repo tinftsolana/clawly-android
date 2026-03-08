@@ -36,6 +36,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../clawly.jks")
+            storePassword = "yarusskiy"
+            keyAlias = "oczko"
+            keyPassword = "pidorpidor"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -43,6 +52,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

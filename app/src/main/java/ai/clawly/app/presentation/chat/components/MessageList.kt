@@ -19,6 +19,9 @@ fun MessageList(
     onRetry: () -> Unit,
     onReconnect: () -> Unit,
     onTopUpCreditsClick: () -> Unit,
+    onSignRequest: () -> Unit,
+    onRejectSignRequest: () -> Unit,
+    onOpenSolscan: (String) -> Unit,
     listState: LazyListState,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp)
@@ -33,17 +36,28 @@ fun MessageList(
             items = messages,
             key = { it.id }
         ) { message ->
-            if (message.isError) {
-                ErrorMessageBubble(
-                    message = message,
-                    onRetry = onRetry,
-                    onReconnect = onReconnect
-                )
-            } else {
-                MessageBubble(
-                    message = message,
-                    onTopUpCreditsClick = onTopUpCreditsClick
-                )
+            when {
+                message.isSignRequest -> {
+                    SignRequestBubble(
+                        state = message.signRequestState!!,
+                        onSign = onSignRequest,
+                        onReject = onRejectSignRequest,
+                        onOpenSolscan = onOpenSolscan
+                    )
+                }
+                message.isError -> {
+                    ErrorMessageBubble(
+                        message = message,
+                        onRetry = onRetry,
+                        onReconnect = onReconnect
+                    )
+                }
+                else -> {
+                    MessageBubble(
+                        message = message,
+                        onTopUpCreditsClick = onTopUpCreditsClick
+                    )
+                }
             }
         }
 
