@@ -9,5 +9,6 @@ import kotlinx.serialization.Serializable
 data class GatewayMessage(
     val type: String,
     val payload: GatewayPayload? = null,
+    val runId: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )

@@ -60,6 +60,7 @@ class GatewayServiceImpl @Inject constructor(
     private val client = HttpClient(OkHttp) {
         install(WebSockets) {
             pingInterval = -1L  // Disabled - we send pings manually
+            maxFrameSize = Long.MAX_VALUE
         }
         install(DefaultRequest) {
             header("X-Platform", if (BuildConfig.IS_WEB3) "web3" else "web2")
@@ -71,7 +72,7 @@ class GatewayServiceImpl @Inject constructor(
                 // WebSocket connections are long-lived; extend timeouts to prevent premature kills
                 connectTimeout(15, TimeUnit.SECONDS)
                 readTimeout(0, TimeUnit.SECONDS)    // No read timeout (WebSocket idles between messages)
-                writeTimeout(15, TimeUnit.SECONDS)
+                writeTimeout(60, TimeUnit.SECONDS)
             }
         }
     }
@@ -120,8 +121,7 @@ class GatewayServiceImpl @Inject constructor(
     private var connectNonce: String? = null
     private var connectSent = false
     private var reconnectAttempts = 0
-    private val reconnectDelayMs = 1000L  // Start at 1s for faster recovery
-    private val maxReconnectDelayMs = 30_000L
+    private val reconnectDelayMs = 5000L  // Fixed 5s delay (matches iOS spec)
     private val connectChallengeWaitMs = 750L
 
     private enum class ConnectAuthMode { TokenOnly, SignedDevice }
@@ -130,7 +130,6 @@ class GatewayServiceImpl @Inject constructor(
     private var connectAuthMode = ConnectAuthMode.TokenOnly
     private var lastTokenSource = TokenSource.None
     private var didRetryAfterTokenMismatch = false
-    private var awaitingPairingApproval = false
 
     override suspend fun connect() {
         // Mutex prevents concurrent connect() calls (init + onStart race, watchdog overlap, etc.)
@@ -144,6 +143,17 @@ class GatewayServiceImpl @Inject constructor(
         Log.d(TAG, "connect() called, current status: $current")
         suppressAutoReconnect.set(false)
 
+        // Check if managed instance is paused/suspended
+        val hostingType = preferences.getHostingTypeSync()
+        if (hostingType == "managed") {
+            val managedStatus = preferences.getManagedStatusSync()
+            if (managedStatus == "suspended") {
+                Log.d(TAG, "Managed instance is paused/suspended, setting Paused status")
+                _connectionStatus.value = ConnectionStatus.Paused
+                return
+            }
+        }
+
         val gatewayUrl = preferences.getEffectiveGatewayUrl()
         val gatewayToken = preferences.getEffectiveGatewayToken()
         Log.d(TAG, "Effective gateway URL: '$gatewayUrl'")
@@ -152,11 +162,6 @@ class GatewayServiceImpl @Inject constructor(
         if (gatewayUrl.isEmpty()) {
             Log.d(TAG, "No gateway URL configured, staying offline")
             _connectionStatus.value = ConnectionStatus.Offline
-            return
-        }
-
-        if (awaitingPairingApproval) {
-            Log.d(TAG, "Awaiting pairing approval, connect skipped")
             return
         }
 
@@ -172,7 +177,6 @@ class GatewayServiceImpl @Inject constructor(
 
         reconnectAttempts = 0
         reconnectScheduled.set(false)
-        awaitingPairingApproval = false
         _connectionStatus.value = ConnectionStatus.Connecting
 
         doConnect(gatewayUrl)
@@ -271,7 +275,7 @@ class GatewayServiceImpl @Inject constructor(
         webSocketSession = null
         connectionScope?.cancel()
         connectionScope = null
-        awaitingPairingApproval = false
+
         _connectionStatus.value = ConnectionStatus.Offline
         reconnectAttempts = 0
         reconnectScheduled.set(false)
@@ -279,7 +283,7 @@ class GatewayServiceImpl @Inject constructor(
 
     override suspend fun reconnect() {
         Log.d(TAG, "Manual reconnect requested")
-        awaitingPairingApproval = false
+
         disconnect()
         delay(500)
         connect()
@@ -287,23 +291,18 @@ class GatewayServiceImpl @Inject constructor(
 
     /**
      * Schedules a reconnect attempt via reconnectScope (survives connectionScope cancellation).
-     * Uses exponential backoff: 2s, 4s, 8s, 16s, 30s (capped).
+     * Uses fixed 5s delay with infinite retries (matches iOS spec).
+     *
+     * @param preserveErrorStatus if true and current status is Error, keep it visible in UI
+     *        instead of switching to Connecting immediately.
      */
-    private fun scheduleReconnect() {
+    private fun scheduleReconnect(preserveErrorStatus: Boolean = false) {
         if (suppressAutoReconnect.get()) {
             Log.d(TAG, "Auto-reconnect suppressed during manual disconnect/reconnect")
             return
         }
-        if (awaitingPairingApproval) {
-            Log.d(TAG, "Awaiting pairing approval, auto-reconnect paused")
-            cancelPendingConnect()
-            pingJob?.cancel()
-            receiveJob?.cancel()
-            pendingRequests.clear()
-            webSocketSession = null
-            connectionScope?.cancel()
-            connectionScope = null
-            reconnectScheduled.set(false)
+        if (_connectionStatus.value is ConnectionStatus.Paused) {
+            Log.d(TAG, "Instance is paused, skipping reconnect")
             return
         }
 
@@ -323,14 +322,14 @@ class GatewayServiceImpl @Inject constructor(
         connectionScope = null
 
         reconnectAttempts++
-        val delayMs = (reconnectDelayMs * (1L shl (reconnectAttempts - 1).coerceAtMost(4)))
-            .coerceAtMost(maxReconnectDelayMs)
-        Log.d(TAG, "Scheduling reconnect in ${delayMs}ms (attempt $reconnectAttempts)")
+        Log.d(TAG, "Scheduling reconnect in ${reconnectDelayMs}ms (attempt $reconnectAttempts)")
 
-        _connectionStatus.value = ConnectionStatus.Connecting
+        if (!preserveErrorStatus || _connectionStatus.value !is ConnectionStatus.Error) {
+            _connectionStatus.value = ConnectionStatus.Connecting
+        }
 
         reconnectScope.launch {
-            delay(delayMs)
+            delay(reconnectDelayMs)
             reconnectScheduled.set(false)
             val gatewayUrl = preferences.getEffectiveGatewayUrl()
             if (gatewayUrl.isNotEmpty()) {
@@ -346,8 +345,11 @@ class GatewayServiceImpl @Inject constructor(
         thinkingLevel: ThinkingLevel,
         skills: List<SkillPayload>,
         attachments: List<AttachmentPayload>
-    ): Result<Unit> {
-        Log.d(TAG, "sendMessage called: message='$message', connectionStatus=${_connectionStatus.value}")
+    ): Result<String> {
+        Log.d(TAG, "sendMessage called: message='$message', attachments=${attachments.size}, connectionStatus=${_connectionStatus.value}")
+        attachments.forEach { att ->
+            Log.d(TAG, "  attachment: type=${att.type}, mime=${att.mimeType}, file=${att.fileName}, contentLen=${att.content.length}")
+        }
         if (_connectionStatus.value != ConnectionStatus.Online) {
             Log.e(TAG, "sendMessage failed: not connected")
             return Result.failure(GatewayError.NotConnected)
@@ -356,11 +358,12 @@ class GatewayServiceImpl @Inject constructor(
         _streamingState.value = StreamingState.Idle
 
         val sessionKey = preferences.getSessionKeySync()
+        val idempotencyKey = UUID.randomUUID().toString()
         val params = buildJsonObject {
             put("sessionKey", sessionKey)
             put("message", message)
             put("deliver", false)
-            put("idempotencyKey", UUID.randomUUID().toString())
+            put("idempotencyKey", idempotencyKey)
 
             if (attachments.isNotEmpty()) {
                 putJsonArray("attachments") {
@@ -377,8 +380,12 @@ class GatewayServiceImpl @Inject constructor(
         }
 
         return try {
-            request("chat.send", params)
-            Result.success(Unit)
+            val response = request("chat.send", params, timeoutMs = 60_000)
+            // Server may return a different runId than the idempotencyKey we sent
+            val serverRunId = response?.get("runId")?.jsonPrimitive?.contentOrNull
+            val actualRunId = serverRunId ?: idempotencyKey
+            Log.d(TAG, "chat.send resolved: idempotencyKey=$idempotencyKey, serverRunId=$serverRunId, using=$actualRunId")
+            Result.success(actualRunId)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -688,7 +695,18 @@ class GatewayServiceImpl @Inject constructor(
     }
 
     private suspend fun handleChatEvent(payload: JsonObject) {
+        // SessionKey filtering: ignore events for other sessions
+        val eventSessionKey = payload["sessionKey"]?.jsonPrimitive?.contentOrNull?.trim()
+        if (!eventSessionKey.isNullOrEmpty()) {
+            val currentSessionKey = preferences.getSessionKeySync()
+            if (eventSessionKey != currentSessionKey) {
+                Log.d(TAG, "Ignoring chat event for session '$eventSessionKey' (current: '$currentSessionKey')")
+                return
+            }
+        }
+
         val state = payload["state"]?.jsonPrimitive?.contentOrNull ?: return
+        val runId = payload["runId"]?.jsonPrimitive?.contentOrNull
         val message = payload["message"]?.jsonObject ?: return
         val role = message["role"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: return
 
@@ -698,10 +716,10 @@ class GatewayServiceImpl @Inject constructor(
         val errorMessage = message["errorMessage"]?.jsonPrimitive?.contentOrNull
 
         if (stopReason == "error" && errorMessage != null) {
-            Log.e(TAG, "Chat error from server: $errorMessage")
+            Log.e(TAG, "Chat error from server: $errorMessage (runId=$runId)")
             _streamingState.value = StreamingState.Complete
             _incomingMessages.emit(
-                GatewayMessage("chat", GatewayPayload(content = "Error: $errorMessage"))
+                GatewayMessage("chat.error", GatewayPayload(content = "Error: $errorMessage"), runId = runId)
             )
             delay(100)
             _streamingState.value = StreamingState.Idle
@@ -711,18 +729,27 @@ class GatewayServiceImpl @Inject constructor(
         val content = extractMessageText(message) ?: ""
 
         when (state) {
-            "streaming", "partial" -> {
+            "streaming", "partial", "delta" -> {
                 if (content.isNotEmpty()) {
-                    _streamingState.value = StreamingState.Streaming(content)
+                    _streamingState.value = StreamingState.Streaming(content, runId = runId)
                 }
             }
             "final" -> {
                 _streamingState.value = StreamingState.Complete
                 if (content.isNotEmpty()) {
                     _incomingMessages.emit(
-                        GatewayMessage("chat", GatewayPayload(content = content))
+                        GatewayMessage("chat.final", GatewayPayload(content = content), runId = runId)
                     )
                 }
+                delay(100)
+                _streamingState.value = StreamingState.Idle
+            }
+            "aborted" -> {
+                Log.d(TAG, "Chat aborted (runId=$runId)")
+                _streamingState.value = StreamingState.Complete
+                _incomingMessages.emit(
+                    GatewayMessage("chat.aborted", runId = runId)
+                )
                 delay(100)
                 _streamingState.value = StreamingState.Idle
             }
@@ -890,7 +917,7 @@ class GatewayServiceImpl @Inject constructor(
         Log.d(TAG, "Sending connect request (authMode: ${connectAuthMode}, nonce: ${nonce ?: "<none>"}, hasToken: ${token.isNotEmpty()}, tokenPrefix: ${if (token.length > 8) token.take(8) + "..." else "empty"})")
 
         try {
-            val response = request("connect", params, timeoutMs = 60_000)
+            val response = request("connect", params, timeoutMs = 30_000)
 
             // deviceToken is directly in payload (per guide), fallback to auth.deviceToken for compatibility
             val newDeviceToken = response?.get("deviceToken")?.jsonPrimitive?.contentOrNull
@@ -936,7 +963,6 @@ class GatewayServiceImpl @Inject constructor(
 
                     val rid = e.requestId ?: "<unknown>"
                     Log.e(TAG, "Pairing required: requestId=$rid")
-                    awaitingPairingApproval = true
                     _connectionStatus.value = ConnectionStatus.Error(
                         "Pairing required. Approve in Control UI (Devices -> Pairing). requestId=$rid"
                     )
@@ -947,6 +973,8 @@ class GatewayServiceImpl @Inject constructor(
                     }
                     webSocketSession = null
                     _pairingRequired.tryEmit(e.requestId ?: "")
+                    // Keep reconnecting every 5s until pairing is approved (matches iOS spec)
+                    scheduleReconnect(preserveErrorStatus = true)
                 }
                 else -> {
                     Log.e(TAG, "Connect handshake failed: ${e.message}")
@@ -985,8 +1013,12 @@ class GatewayServiceImpl @Inject constructor(
 
                 connectionScope?.launch {
                     try {
-                        session.send(Frame.Text(request.toString()))
+                        val json = request.toString()
+                        Log.d(TAG, "Sending $method frame: ${json.length} chars")
+                        session.send(Frame.Text(json))
+                        Log.d(TAG, "Frame sent successfully for $method")
                     } catch (e: Exception) {
+                        Log.e(TAG, "Failed to send frame for $method: ${e.message}")
                         pendingRequests.remove(id)
                         continuation.resumeWithException(e)
                     }
@@ -1046,7 +1078,7 @@ class GatewayServiceImpl @Inject constructor(
         return controlPlaneService.approvePairing(tenantId, requestId)
             .onSuccess {
                 Log.d(TAG, "Pairing approved, reconnecting...")
-                awaitingPairingApproval = false
+        
                 reconnect()
             }
     }

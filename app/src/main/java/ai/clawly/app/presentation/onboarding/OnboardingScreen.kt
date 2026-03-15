@@ -925,13 +925,13 @@ private fun BottomSection(
 
     // Animate button appearance smoothly
     val buttonAlpha by animateFloatAsState(
-        targetValue = if (currentPage > 0) 1f else 0f,
+        targetValue = 1f,
         animationSpec = tween(300, easing = EaseInOut),
         label = "buttonAlpha"
     )
 
     val buttonScale by animateFloatAsState(
-        targetValue = if (currentPage > 0) 1f else 0.9f,
+        targetValue = 1f,
         animationSpec = tween(300, easing = EaseInOut),
         label = "buttonScale"
     )
@@ -987,7 +987,7 @@ private fun BottomSection(
                         scaleX = buttonScale
                         scaleY = buttonScale
                     },
-                enabled = currentPage > 0,
+                enabled = true,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ClawlyColors.accentPrimary,
                     disabledContainerColor = ClawlyColors.accentPrimary

@@ -41,14 +41,15 @@ interface GatewayService {
     suspend fun reconnect()
 
     /**
-     * Send a chat message
+     * Send a chat message.
+     * Returns the server-assigned runId on success (for correlation with chat events).
      */
     suspend fun sendMessage(
         message: String,
         thinkingLevel: ThinkingLevel = ThinkingLevel.Medium,
         skills: List<SkillPayload> = emptyList(),
         attachments: List<AttachmentPayload> = emptyList()
-    ): Result<Unit>
+    ): Result<String>
 
     /** Fetch chat history */
     suspend fun fetchHistory(sessionKey: String? = null): Result<List<ChatHistoryMessage>>

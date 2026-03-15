@@ -3,7 +3,9 @@ package ai.clawly.app.presentation.paywall
 import ai.clawly.app.R
 import ai.clawly.app.data.remote.solana.SolanaOffer
 import ai.clawly.app.ui.theme.ClawlyColors
+import ai.clawly.app.ui.theme.ClawlyRadius
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -11,11 +13,16 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +34,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +52,16 @@ data class CreditPackage(
     val credits: Int,
     val priceSol: String,
     val pricePerCredit: String
+)
+
+private val ScrimColor = Color(0xFF141419)
+
+private val Perks = listOf(
+    "Ready-to-use OpenClaw agent",
+    "Thousands of skills via ClawHub",
+    "MCP integrations built-in",
+    "Top AI models, no setup needed",
+    "Voice & image capabilities"
 )
 
 @Composable
@@ -67,12 +86,11 @@ fun Web3PaywallScreen(
     onSuccessDismiss: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
 
     var animateContent by remember { mutableStateOf(false) }
     var showCloseButton by remember { mutableStateOf(false) }
 
-    // Convert SolanaOffer to CreditPackage for display
-    // Use API offers if available, fallback to hardcoded for backward compatibility
     val creditPackages = remember(offers) {
         if (offers.isNotEmpty()) {
             offers.map { offer ->
@@ -84,7 +102,6 @@ fun Web3PaywallScreen(
                 )
             }
         } else {
-            // Fallback to hardcoded packages
             listOf(
                 CreditPackage("pack_test", 10, "0.001", "0.0001"),
                 CreditPackage("pack_1", 2000, "0.267", "0.000134"),
@@ -122,80 +139,58 @@ fun Web3PaywallScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(ClawlyColors.background, ClawlyColors.surface)
-                )
-            )
+            .background(ClawlyColors.background)
     ) {
-        // Accent glow at top
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(400.dp)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            ClawlyColors.accentPrimary.copy(alpha = 0.08f),
-                            Color.Transparent
-                        )
-                    )
-                )
+        // ── Giant Clawly (background, upper area) ──
+        GiantClawlyBackground(
+            animateContent = animateContent,
+            sparkleRotation = sparkleRotation,
+            screenHeight = screenHeight
         )
 
+        // ── Gradient scrim ──
+        Column(modifier = Modifier.fillMaxSize()) {
+            Spacer(modifier = Modifier.height(screenHeight * 0.12f))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(screenHeight * 0.30f)
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Transparent,
+                                0.35f to ScrimColor.copy(alpha = 0.60f),
+                                0.60f to ScrimColor.copy(alpha = 0.90f),
+                                1.00f to ScrimColor
+                            )
+                        )
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(ScrimColor)
+            )
+        }
+
+        // ── Foreground content — bottom-anchored ──
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top row with credits and close button
+            // Close button (top-right, fixed)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp)
                     .height(44.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Credits display (left side)
-                AnimatedVisibility(
-                    visible = animateContent && isWalletConnected,
-                    enter = fadeIn()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(ClawlyColors.surfaceElevated)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "✦",
-                            fontSize = 14.sp,
-                            color = ClawlyColors.accentPrimary
-                        )
-                        Text(
-                            text = formatCredits(currentCredits),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = ClawlyColors.textPrimary
-                        )
-                        Text(
-                            text = "credits",
-                            fontSize = 12.sp,
-                            color = ClawlyColors.secondaryText
-                        )
-                    }
-                }
-
-                // Spacer when credits not visible
-                if (!isWalletConnected) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-
-                // Close button (right side)
                 AnimatedVisibility(
                     visible = showCloseButton,
                     enter = fadeIn()
@@ -211,13 +206,13 @@ fun Web3PaywallScreen(
                         Box(
                             modifier = Modifier
                                 .size(30.dp)
-                                .background(ClawlyColors.surfaceElevated, CircleShape),
+                                .background(Color.Black.copy(alpha = 0.40f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Close",
-                                tint = ClawlyColors.secondaryText,
+                                tint = Color.White.copy(alpha = 0.80f),
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -225,121 +220,117 @@ fun Web3PaywallScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Logo with sparkles
-            Web3PaywallHeader(
-                animateContent = animateContent,
-                sparkleRotation = sparkleRotation
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Title
-            AnimatedVisibility(
-                visible = animateContent,
-                enter = fadeIn() + slideInVertically { 20 }
+            // Scrollable middle content (fills remaining space above bottom)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
+                // Title — "Join" / "Clawly Pro"
+                AnimatedVisibility(
+                    visible = animateContent,
+                    enter = fadeIn(tween(500)) + slideInVertically(tween(500)) { 20 }
                 ) {
-                    Text(
-                        text = "Join",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ClawlyColors.textPrimary
-                    )
-                    Text(
-                        text = "Clawly AI",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = ClawlyColors.accentPrimary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Subtitle
-            AnimatedVisibility(
-                visible = animateContent,
-                enter = fadeIn() + slideInVertically { 10 }
-            ) {
-                Text(
-                    text = "Pay only for what you use.\nNo subscriptions.",
-                    fontSize = 14.sp,
-                    color = ClawlyColors.secondaryText,
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Credit packages grid
-            AnimatedVisibility(
-                visible = animateContent,
-                enter = fadeIn() + slideInVertically { 30 }
-            ) {
-                if (isLoadingOffers) {
-                    // Loading state
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
-                                color = ClawlyColors.accentPrimary,
-                                strokeWidth = 3.dp
-                            )
-                            Text(
-                                text = "Loading offers...",
-                                fontSize = 14.sp,
-                                color = ClawlyColors.secondaryText
-                            )
-                        }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Join",
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ClawlyColors.textPrimary
+                        )
+                        Text(
+                            text = "Clawly Pro",
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Black,
+                            color = ClawlyColors.accentPrimary
+                        )
                     }
-                } else {
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Perks checklist
+                AnimatedVisibility(
+                    visible = animateContent,
+                    enter = fadeIn(tween(500)) + slideInVertically(tween(500)) { 20 }
+                ) {
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.padding(horizontal = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
-                        // First row - 2 packages
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            creditPackages.take(2).forEach { pkg ->
-                                CreditPackageCard(
-                                    package_ = pkg,
-                                    isSelected = selectedPackageId == pkg.id,
-                                    isEnabled = !isPurchasing,
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onSelectPackage(pkg.id)
-                                    },
-                                    modifier = Modifier.weight(1f)
+                        Perks.forEach { perk ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = ClawlyColors.accentPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = perk,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.90f)
                                 )
                             }
                         }
-                        // Second row - remaining packages
-                        if (creditPackages.size > 2) {
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Credit packages grid
+                AnimatedVisibility(
+                    visible = animateContent,
+                    enter = fadeIn(tween(500, delayMillis = 100)) + slideInVertically(tween(500, delayMillis = 100)) { 20 }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { clip = false }
+                            .animateContentSize(animationSpec = tween(300))
+                    ) {
+                        if (isLoadingOffers) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = ClawlyColors.accentPrimary,
+                                    strokeWidth = 3.dp
+                                )
+                            }
+                        } else {
+                            Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .padding(top = 10.dp)
+                                .graphicsLayer { clip = false },
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // First row - 2 packages
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer { clip = false },
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                creditPackages.drop(2).take(2).forEach { pkg ->
+                                creditPackages.take(2).forEachIndexed { index, pkg ->
                                     CreditPackageCard(
                                         package_ = pkg,
                                         isSelected = selectedPackageId == pkg.id,
                                         isEnabled = !isPurchasing,
+                                        showBestOffer = index == 1,
                                         onClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             onSelectPackage(pkg.id)
@@ -347,19 +338,40 @@ fun Web3PaywallScreen(
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
-                                // Add empty space if odd number of packages in second row
-                                if (creditPackages.drop(2).size == 1) {
-                                    Spacer(modifier = Modifier.weight(1f))
+                            }
+                            // Second row
+                            if (creditPackages.size > 2) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    creditPackages.drop(2).take(2).forEach { pkg ->
+                                        CreditPackageCard(
+                                            package_ = pkg,
+                                            isSelected = selectedPackageId == pkg.id,
+                                            isEnabled = !isPurchasing,
+                                            showBestOffer = false,
+                                            onClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onSelectPackage(pkg.id)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (creditPackages.drop(2).size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
                     }
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Bottom section
+            // ── Bottom pinned section ──
             Web3PaywallBottomSection(
                 walletAddress = walletAddress,
                 isWalletConnected = isWalletConnected,
@@ -368,6 +380,7 @@ fun Web3PaywallScreen(
                 isWaitingForConfirmation = isWaitingForConfirmation,
                 isRestoringCredits = isRestoringCredits,
                 canPurchase = isWalletConnected && selectedPackageId != null,
+                currentCredits = currentCredits,
                 animateContent = animateContent,
                 onConnectWallet = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -397,126 +410,174 @@ fun Web3PaywallScreen(
     }
 }
 
+// ── Giant Clawly background ──
+
 @Composable
-private fun Web3PaywallHeader(
+private fun GiantClawlyBackground(
     animateContent: Boolean,
     sparkleRotation: Float,
-    modifier: Modifier = Modifier
+    screenHeight: androidx.compose.ui.unit.Dp
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(100.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // Radial glow
+    val infiniteTransition = rememberInfiniteTransition(label = "crabFloat")
+    val floatOffset by infiniteTransition.animateFloat(
+        initialValue = -3f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "crabFloat"
+    )
+
+    val crabScale by animateFloatAsState(
+        targetValue = if (animateContent) 1f else 0.6f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
+        label = "crabScale"
+    )
+    val crabAlpha by animateFloatAsState(
+        targetValue = if (animateContent) 1f else 0f,
+        animationSpec = tween(700),
+        label = "crabAlpha"
+    )
+
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+
+    Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
-                .size(160.dp)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            ClawlyColors.accentPrimary.copy(alpha = 0.2f),
-                            ClawlyColors.accentPrimary.copy(alpha = 0.05f),
-                            Color.Transparent
-                        )
-                    ),
-                    shape = CircleShape
+                .offset(
+                    x = screenWidth * 0.15f - 225.dp,
+                    y = screenHeight * 0.10f - 225.dp + floatOffset.dp
                 )
-        )
+                .size(600.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Radial glow
+            Box(
+                modifier = Modifier
+                    .size(600.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colorStops = arrayOf(
+                                0.13f to ClawlyColors.accentPrimary.copy(alpha = 0.25f),
+                                0.33f to ClawlyColors.accentPrimary.copy(alpha = 0.10f),
+                                0.66f to ClawlyColors.accentPrimary.copy(alpha = 0.03f),
+                                1.00f to Color.Transparent
+                            )
+                        ),
+                        shape = CircleShape
+                    )
+            )
 
-        // Sparkles
-        repeat(6) { index ->
-            val angle = (index * 60f + sparkleRotation) * PI / 180
-            val offsetX = (cos(angle) * 50).toFloat()
-            val offsetY = (sin(angle) * 50).toFloat()
+            // Sparkles orbiting
+            repeat(6) { index ->
+                val angle = (index * 60f + sparkleRotation) * PI / 180
+                val offsetX = (cos(angle) * 160).toFloat()
+                val offsetY = (sin(angle) * 160).toFloat()
 
-            Text(
-                text = "✦",
-                fontSize = if (index % 2 == 0) 14.sp else 10.sp,
-                color = ClawlyColors.accentPrimary.copy(alpha = 0.9f),
-                modifier = Modifier.offset(x = offsetX.dp, y = offsetY.dp)
+                Text(
+                    text = "✦",
+                    fontSize = if (index % 2 == 0) 20.sp else 14.sp,
+                    color = ClawlyColors.accentPrimary.copy(alpha = 0.60f),
+                    modifier = Modifier.offset(x = offsetX.dp, y = offsetY.dp)
+                )
+            }
+
+            // Crab image
+            Image(
+                painter = painterResource(id = R.drawable.clawly),
+                contentDescription = "Clawly",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(450.dp)
+                    .shadow(
+                        elevation = 50.dp,
+                        spotColor = ClawlyColors.accentPrimary.copy(alpha = 0.40f),
+                        shape = CircleShape
+                    )
+                    .graphicsLayer {
+                        scaleX = crabScale
+                        scaleY = crabScale
+                        alpha = crabAlpha
+                        rotationZ = 15f
+                        translationY = floatOffset * 3
+                    }
             )
         }
-
-        // Logo
-        val scale by animateFloatAsState(
-            targetValue = if (animateContent) 1f else 0.8f,
-            animationSpec = spring(dampingRatio = 0.7f),
-            label = "logoScale"
-        )
-        val alpha by animateFloatAsState(
-            targetValue = if (animateContent) 1f else 0f,
-            animationSpec = tween(600),
-            label = "logoAlpha"
-        )
-
-        Image(
-            painter = painterResource(id = R.drawable.clawly),
-            contentDescription = "Clawly",
-            modifier = Modifier
-                .size(80.dp)
-                .shadow(
-                    elevation = 12.dp,
-                    spotColor = ClawlyColors.accentPrimary.copy(alpha = 0.4f),
-                    shape = CircleShape
-                )
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha
-                }
-        )
     }
 }
+
+// ── Credit Package Card ──
 
 @Composable
 private fun CreditPackageCard(
     package_: CreditPackage,
     isSelected: Boolean,
     isEnabled: Boolean,
+    showBestOffer: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val cardScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessHigh
+        ),
+        label = "cardScale"
+    )
+
+    val cardAlpha = if (isSelected) 1f else 0.85f
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+                clip = false
+            }
+            .padding(top = 12.dp)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(
-                    if (isSelected) ClawlyColors.accentPrimary.copy(alpha = 0.1f)
-                    else ClawlyColors.surface
+                .then(
+                    if (isSelected) Modifier.shadow(
+                        elevation = 12.dp,
+                        spotColor = ClawlyColors.accentPrimary.copy(alpha = 0.20f),
+                        shape = RoundedCornerShape(ClawlyRadius.md.dp)
+                    ) else Modifier
                 )
+                .clip(RoundedCornerShape(ClawlyRadius.md.dp))
+                .background(ClawlyColors.surface)
                 .border(
                     width = if (isSelected) 2.dp else 1.dp,
                     color = if (isSelected) ClawlyColors.accentPrimary
-                           else if (isEnabled) ClawlyColors.surfaceBorder
-                           else ClawlyColors.surfaceBorder.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(16.dp)
+                    else ClawlyColors.surfaceBorder,
+                    shape = RoundedCornerShape(ClawlyRadius.md.dp)
                 )
-                .clickable(enabled = isEnabled) { onClick() }
-                .padding(16.dp),
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    enabled = isEnabled
+                ) { onClick() }
+                .graphicsLayer { alpha = if (isEnabled) cardAlpha else 0.5f }
+                .padding(vertical = 12.dp, horizontal = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Credits amount
+            // "10 credits"
             Text(
-                text = "${package_.credits}",
-                fontSize = 28.sp,
+                text = "${package_.credits} credits",
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isEnabled) ClawlyColors.textPrimary
-                       else ClawlyColors.textPrimary.copy(alpha = 0.5f)
-            )
-            Text(
-                text = "credits",
-                fontSize = 12.sp,
-                color = if (isEnabled) ClawlyColors.secondaryText
-                       else ClawlyColors.secondaryText.copy(alpha = 0.5f)
+                color = ClawlyColors.textPrimary
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Price in SOL
+            // icon + 0.001 SOL
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -524,60 +585,51 @@ private fun CreditPackageCard(
                 Image(
                     painter = painterResource(id = R.drawable.ic_solana),
                     contentDescription = "SOL",
-                    modifier = Modifier
-                        .size(18.dp)
-                        .graphicsLayer {
-                            alpha = if (isEnabled) 1f else 0.5f
-                        }
+                    modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = package_.priceSol,
-                    fontSize = 18.sp,
+                    text = "${package_.priceSol} SOL",
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isEnabled) ClawlyColors.textPrimary
-                           else ClawlyColors.textPrimary.copy(alpha = 0.5f)
-                )
-                Text(
-                    text = " SOL",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (isEnabled) ClawlyColors.secondaryText
-                           else ClawlyColors.secondaryText.copy(alpha = 0.5f)
+                    color = ClawlyColors.secondaryText
                 )
             }
         }
 
-        // Selection indicator - X in top right with offset
-        if (isSelected) {
+        // "BEST OFFER" badge
+        if (showBestOffer) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 6.dp, y = (-6).dp)
-                    .size(22.dp)
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-20).dp)
                     .shadow(
                         elevation = 4.dp,
-                        shape = RoundedCornerShape(6.dp)
+                        spotColor = ClawlyColors.accentPrimary.copy(alpha = 0.40f),
+                        shape = RoundedCornerShape(50)
                     )
                     .background(
                         ClawlyColors.accentPrimary,
-                        shape = RoundedCornerShape(6.dp)
-                    ),
+                        shape = RoundedCornerShape(50)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 3.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Selected",
-                    tint = Color.White,
-                    modifier = Modifier.size(14.dp)
+                Text(
+                    text = "BEST OFFER",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
         }
     }
 }
 
+// ── Bottom Section (pinned) ──
+
 @Composable
-private fun Web3PaywallBottomSection(
+private fun ColumnScope.Web3PaywallBottomSection(
     walletAddress: String?,
     isWalletConnected: Boolean,
     isConnecting: Boolean,
@@ -585,6 +637,7 @@ private fun Web3PaywallBottomSection(
     isWaitingForConfirmation: Boolean,
     isRestoringCredits: Boolean,
     canPurchase: Boolean,
+    currentCredits: Int,
     animateContent: Boolean,
     onConnectWallet: () -> Unit,
     onPurchase: () -> Unit,
@@ -593,18 +646,8 @@ private fun Web3PaywallBottomSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        ClawlyColors.surface.copy(alpha = 0.8f),
-                        ClawlyColors.surface
-                    )
-                )
-            )
             .padding(horizontal = 24.dp)
-            .navigationBarsPadding()
-            .padding(bottom = 16.dp),
+            .navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Connected wallet info
@@ -616,7 +659,7 @@ private fun Web3PaywallBottomSection(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(ClawlyRadius.md.dp))
                         .background(ClawlyColors.surfaceElevated)
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -625,7 +668,7 @@ private fun Web3PaywallBottomSection(
                     Box(
                         modifier = Modifier
                             .size(8.dp)
-                            .background(Color(0xFF4CAF50), CircleShape)
+                            .background(ClawlyColors.success, CircleShape)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -634,27 +677,36 @@ private fun Web3PaywallBottomSection(
                         color = ClawlyColors.textPrimary,
                         fontWeight = FontWeight.Medium
                     )
+                    if (currentCredits > 0) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "✦ ${formatCredits(currentCredits)}",
+                            fontSize = 13.sp,
+                            color = ClawlyColors.accentPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // Main CTA Button
+        // CTA Button
         AnimatedVisibility(
             visible = animateContent,
-            enter = fadeIn() + slideInVertically { 20 }
+            enter = fadeIn(tween(500, delayMillis = 200)) + slideInVertically(tween(500, delayMillis = 200)) { 20 }
         ) {
             Button(
                 onClick = if (isWalletConnected) onPurchase else onConnectWallet,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .height(54.dp),
                 enabled = if (isWalletConnected) canPurchase && !isPurchasing && !isWaitingForConfirmation else !isConnecting,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ClawlyColors.accentPrimary,
                     disabledContainerColor = ClawlyColors.accentPrimary.copy(alpha = 0.5f)
                 ),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(ClawlyRadius.md.dp)
             ) {
                 Box(
                     modifier = Modifier.fillMaxWidth(),
@@ -697,37 +749,23 @@ private fun Web3PaywallBottomSection(
             }
         }
 
-        // Restore Credits button (when wallet connected)
-        if (isWalletConnected) {
-            Spacer(modifier = Modifier.height(2.dp))
-            AnimatedVisibility(
-                visible = animateContent,
-                enter = fadeIn()
-            ) {
-                TextButton(
-                    onClick = onRestoreCredits,
-                    enabled = !isPurchasing && !isWaitingForConfirmation && !isRestoringCredits
-                ) {
-                    if (isRestoringCredits) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = ClawlyColors.accentPrimary,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Text(
-                        text = if (isRestoringCredits) "Restoring..." else "Restore Credits",
-                        fontSize = 14.sp,
-                        color = ClawlyColors.accentPrimary
-                    )
-                }
-            }
+        // "No commitment" text
+        Spacer(modifier = Modifier.height(6.dp))
+        AnimatedVisibility(
+            visible = animateContent,
+            enter = fadeIn()
+        ) {
+            Text(
+                text = "Pay only for what you use \u00B7 No subscriptions",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = ClawlyColors.secondaryText
+            )
         }
 
-        // Helper text
+        // Helper text when wallet not connected
         if (!isWalletConnected) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             AnimatedVisibility(
                 visible = animateContent,
                 enter = fadeIn()
@@ -740,24 +778,37 @@ private fun Web3PaywallBottomSection(
                 )
             }
         }
+
+        // Footer: Restore Credits (very bottom)
+        AnimatedVisibility(
+            visible = animateContent,
+            enter = fadeIn()
+        ) {
+            TextButton(
+                onClick = onRestoreCredits,
+                enabled = !isPurchasing && !isWaitingForConfirmation && !isRestoringCredits,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(28.dp)
+            ) {
+                if (isRestoringCredits) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        color = ClawlyColors.textTertiary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                Text(
+                    text = if (isRestoringCredits) "Restoring..." else "Restore Credits",
+                    fontSize = 11.sp,
+                    color = ClawlyColors.textTertiary
+                )
+            }
+        }
     }
 }
 
-private fun shortenAddress(address: String): String {
-    return if (address.length > 10) {
-        "${address.take(6)}...${address.takeLast(4)}"
-    } else {
-        address
-    }
-}
-
-private fun formatCredits(credits: Int): String {
-    return when {
-        credits >= 1_000_000 -> String.format("%.1fM", credits / 1_000_000.0)
-        credits >= 1_000 -> String.format("%.1fK", credits / 1_000.0)
-        else -> credits.toString()
-    }
-}
+// ── Success Overlay ──
 
 @Composable
 private fun PurchaseSuccessOverlay(
@@ -778,29 +829,24 @@ private fun PurchaseSuccessOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Success icon with glow
-            Box(
-                contentAlignment = Alignment.Center
-            ) {
-                // Glow
+            Box(contentAlignment = Alignment.Center) {
                 Box(
                     modifier = Modifier
                         .size(120.dp)
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFF4CAF50).copy(alpha = 0.3f),
+                                    ClawlyColors.success.copy(alpha = 0.3f),
                                     Color.Transparent
                                 )
                             ),
                             shape = CircleShape
                         )
                 )
-                // Icon
                 Box(
                     modifier = Modifier
                         .size(80.dp)
-                        .background(Color(0xFF4CAF50), CircleShape),
+                        .background(ClawlyColors.success, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -812,7 +858,6 @@ private fun PurchaseSuccessOverlay(
                 }
             }
 
-            // Success text
             Text(
                 text = "Purchase Successful!",
                 fontSize = 24.sp,
@@ -820,7 +865,6 @@ private fun PurchaseSuccessOverlay(
                 color = ClawlyColors.textPrimary
             )
 
-            // Credits received
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -840,16 +884,15 @@ private fun PurchaseSuccessOverlay(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Continue button
             Button(
                 onClick = onDismiss,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .height(54.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ClawlyColors.accentPrimary
                 ),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(ClawlyRadius.md.dp)
             ) {
                 Text(
                     text = "Continue",
@@ -858,5 +901,23 @@ private fun PurchaseSuccessOverlay(
                 )
             }
         }
+    }
+}
+
+// ── Utilities ──
+
+private fun shortenAddress(address: String): String {
+    return if (address.length > 10) {
+        "${address.take(6)}...${address.takeLast(4)}"
+    } else {
+        address
+    }
+}
+
+private fun formatCredits(credits: Int): String {
+    return when {
+        credits >= 1_000_000 -> String.format("%.1fM", credits / 1_000_000.0)
+        credits >= 1_000 -> String.format("%.1fK", credits / 1_000.0)
+        else -> credits.toString()
     }
 }

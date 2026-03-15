@@ -196,35 +196,6 @@ fun FullSettingsScreen(
                     if (config.hostingType == HostingType.Managed && config.isConfigured) {
                         SettingsDivider()
                         SettingsRow(
-                            icon = Icons.Default.Star,
-                            iconTint = ClawlyColors.terminalGreen,
-                            title = "Credits",
-                            showChevron = false,
-                            trailing = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    if (uiState.isLoadingCredits) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            color = ClawlyColors.accentPrimary,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Text(
-                                            text = uiState.creditsFormatted,
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = ClawlyColors.terminalGreen
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = { viewModel.fetchCredits() }
-                        )
-                        SettingsDivider()
-                        SettingsRow(
                             icon = Icons.Default.Add,
                             iconTint = ClawlyColors.accentPrimary,
                             title = "Buy Credits",
@@ -1646,6 +1617,7 @@ private fun getHostingStatusColor(
             is ConnectionStatus.Online -> ClawlyColors.terminalGreen
             is ConnectionStatus.Connecting -> ClawlyColors.warning
             is ConnectionStatus.Offline -> ClawlyColors.textMuted
+            is ConnectionStatus.Paused -> ClawlyColors.warning
             is ConnectionStatus.Error -> ClawlyColors.error
         }
         else -> ClawlyColors.error
@@ -1675,6 +1647,7 @@ private fun getHostingStatusLabel(
             is ConnectionStatus.Online -> "Connected"
             is ConnectionStatus.Connecting -> "Connecting..."
             is ConnectionStatus.Offline -> "Disconnected"
+            is ConnectionStatus.Paused -> "Paused"
             is ConnectionStatus.Error -> "Error"
         }
         else -> "Error"
@@ -1685,6 +1658,7 @@ private fun getConnectionStatusColor(status: ConnectionStatus): Color = when (st
     is ConnectionStatus.Online -> ClawlyColors.terminalGreen
     is ConnectionStatus.Connecting -> ClawlyColors.warning
     is ConnectionStatus.Offline -> ClawlyColors.textMuted
+    is ConnectionStatus.Paused -> ClawlyColors.warning
     is ConnectionStatus.Error -> ClawlyColors.error
 }
 
@@ -1692,5 +1666,6 @@ private fun getConnectionStatusText(status: ConnectionStatus): String = when (st
     is ConnectionStatus.Online -> "Connected"
     is ConnectionStatus.Connecting -> "Connecting..."
     is ConnectionStatus.Offline -> "Offline"
+    is ConnectionStatus.Paused -> "Paused"
     is ConnectionStatus.Error -> "Error"
 }

@@ -152,6 +152,7 @@ private val ConnectionStatus.displayText: String
         is ConnectionStatus.Online -> "Connected"
         is ConnectionStatus.Connecting -> "Connecting..."
         is ConnectionStatus.Offline -> "Offline"
+        is ConnectionStatus.Paused -> "Paused"
         is ConnectionStatus.Error -> "Error"
     }
 
@@ -160,5 +161,6 @@ private val ConnectionStatus.color: Color
         is ConnectionStatus.Online -> Color(0xFF34C759) // Green
         is ConnectionStatus.Connecting -> Color(0xFFFF9500) // Orange
         is ConnectionStatus.Offline -> Color(0xFF8E8E93) // Gray
+        is ConnectionStatus.Paused -> Color(0xFFFF9500) // Orange
         is ConnectionStatus.Error -> Color(0xFFFF3B30) // Red
     }

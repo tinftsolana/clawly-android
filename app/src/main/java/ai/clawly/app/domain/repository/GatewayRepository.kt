@@ -76,7 +76,7 @@ data class SkillPayload(
  * Attachment payload for sending files/images
  */
 data class AttachmentPayload(
-    val type: String = "file",
+    val type: String = "image",
     val mimeType: String,
     val fileName: String,
     val content: String // Base64 encoded
@@ -84,7 +84,7 @@ data class AttachmentPayload(
     companion object {
         fun fromImageData(data: ByteArray, fileName: String, mimeType: String): AttachmentPayload {
             return AttachmentPayload(
-                type = "file",
+                type = "image",
                 mimeType = mimeType,
                 fileName = fileName,
                 content = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)

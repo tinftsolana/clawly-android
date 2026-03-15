@@ -26,14 +26,29 @@ fun MessageList(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp)
 ) {
+    // reverseLayout = true means index 0 is at the bottom.
+    // We feed items in reversed order so newest messages appear at the bottom.
     LazyColumn(
         modifier = modifier,
         state = listState,
         contentPadding = contentPadding,
-        reverseLayout = false
+        reverseLayout = true
     ) {
+        // Bottom spacer (appears at top visually in reverse layout, but is index 0)
+        item(key = "bottom_spacer") {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Typing indicator (index 1 when present)
+        if (isAssistantTyping) {
+            item(key = "typing_indicator") {
+                TypingIndicator(streamingContent = streamingContent)
+            }
+        }
+
+        // Messages in reverse order (newest first = bottom of screen)
         items(
-            items = messages,
+            items = messages.asReversed(),
             key = { it.id }
         ) { message ->
             when {
@@ -60,32 +75,13 @@ fun MessageList(
                 }
             }
         }
-
-        // Typing indicator
-        if (isAssistantTyping) {
-            item(key = "typing_indicator") {
-                TypingIndicator(streamingContent = streamingContent)
-            }
-        }
-
-        // Bottom spacer for better scroll experience
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
     }
 }
 
-private fun LazyListState.lastIndex(messagesSize: Int, isTyping: Boolean): Int {
-    // messages + typing indicator (if present) + bottom spacer
-    return messagesSize + (if (isTyping) 1 else 0) + 1 - 1
-}
-
 /**
- * Auto-scroll to bottom:
- * - On initial load (instant)
- * - When new messages arrive
- * - When typing state changes
- * - When keyboard opens (via imeVisible param)
+ * Auto-scroll to bottom (index 0 in reverse layout).
+ * Since reverseLayout = true, the list naturally starts at the bottom.
+ * We only need to scroll on new messages / typing changes.
  */
 @Composable
 fun rememberAutoScrollState(
@@ -94,29 +90,20 @@ fun rememberAutoScrollState(
     imeVisible: Boolean = false
 ): LazyListState {
     val listState = rememberLazyListState()
-    val lastIdx = listState.lastIndex(messages.size, isTyping)
 
-    // Initial scroll - instant, no animation
-    LaunchedEffect(Unit) {
-        if (messages.isNotEmpty()) {
-            listState.scrollToItem(lastIdx)
-        }
-    }
-
-    // Scroll when messages change or typing changes
+    // Scroll to bottom (index 0) when new messages arrive or typing changes
     LaunchedEffect(messages.size, isTyping) {
         if (messages.isNotEmpty()) {
-            // Small delay to let layout settle
             delay(50)
-            listState.animateScrollToItem(lastIdx)
+            listState.animateScrollToItem(0)
         }
     }
 
-    // Scroll when keyboard opens or closes
+    // Scroll when keyboard opens/closes
     LaunchedEffect(imeVisible) {
         if (messages.isNotEmpty()) {
             delay(100)
-            listState.animateScrollToItem(lastIdx)
+            listState.animateScrollToItem(0)
         }
     }
 

@@ -5,9 +5,11 @@ import ai.clawly.app.domain.model.ChatMessage
 import ai.clawly.app.domain.model.MessageAttachment
 import ai.clawly.app.ui.theme.ClawlyColors
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,6 +53,7 @@ private val AssistantBubbleShape = RoundedCornerShape(
     bottomEnd = 20.dp
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     message: ChatMessage,
@@ -107,6 +110,10 @@ fun MessageBubble(
                                     shape = AssistantBubbleShape
                                 )
                             } else Modifier
+                        )
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { showMenu = true }
                         )
                 ) {
                     DropdownMenu(

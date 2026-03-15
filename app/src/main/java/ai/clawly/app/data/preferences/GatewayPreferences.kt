@@ -195,6 +195,10 @@ class GatewayPreferences @Inject constructor(
         }
     }
 
+    suspend fun getManagedStatusSync(): String? {
+        return dataStore.data.first()[KEY_MANAGED_STATUS]
+    }
+
     val managedGatewayUrl: Flow<String?> = dataStore.data.map { prefs ->
         prefs[KEY_MANAGED_GATEWAY_URL]
     }

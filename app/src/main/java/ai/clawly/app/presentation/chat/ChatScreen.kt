@@ -38,13 +38,6 @@ import kotlinx.coroutines.flow.collectLatest
 import java.util.Locale
 import java.util.UUID
 
-private const val DEBUG_SOLANA_MCP_PROMPT = """
-Сделай перевод 10000 lamports с Z4aYdwpPZAsnGnC9EDpybQjsso1Sx4Evu26nQyAe2rd на 9k3roqmt1J32SHJ17KS9mZz7B4Cg8KBrRj1AFY4UWAcR через наш Solana MCP flow.
-"""
-
-private const val DEBUG_SOLANA_SWAP_PROMPT = """
-Сделай свап 0.0001 SOL в USDC через наш Solana MCP flow (Jupiter), используя default wallet.
-"""
 
 @Composable
 fun ChatScreen(
@@ -451,16 +444,10 @@ fun ChatScreen(
                 onSend = {
                     if (inputText.isNotBlank() || uiState.pendingAttachments.isNotEmpty()) {
                         viewModel.sendMessage(inputText)
-                        inputText = ""
+                        // Don't clear here — MessageSent event clears inputText
+                        // so the message stays in the field if validation fails
                     }
                 },
-                onInsertDebugPrompt = {
-                    inputText = DEBUG_SOLANA_MCP_PROMPT.trim()
-                },
-                onInsertDebugSwapPrompt = {
-                    inputText = DEBUG_SOLANA_SWAP_PROMPT.trim()
-                },
-                showDebugPromptButton = BuildConfig.DEBUG,
                 onAddAttachment = {
                     photoPickerLauncher.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)

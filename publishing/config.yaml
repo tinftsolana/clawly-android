@@ -1,0 +1,164 @@
+publisher:
+  name: Clawly Apps
+  address: GMbHETuZtLdEk5Zq48b3jiVr6PM8UsEMzmUV4jxNpQKv
+  website: https://clawlyai.io
+  email: clawlyagent@clawlyai.io
+  media:
+    - purpose: icon
+      uri: ../screenshots/logo.png
+app:
+  name: Clawly AI
+  address: FnDRDHcC8h94u3dRBcFXKH21hxdMr7ynVipHtxYFxpze
+  android_package: ai.clawly.app
+  urls:
+    website: https://clawlyai.io
+    copyright_url: https://docs.google.com/document/d/1NUAcle14HNFpF8-JsKhEKdVnuXcNRg9uFlWV9uFbIUM/edit?usp=sharing
+    license_url: https://docs.google.com/document/d/1NUAcle14HNFpF8-JsKhEKdVnuXcNRg9uFlWV9uFbIUM/edit?usp=sharing
+    privacy_policy_url: https://docs.google.com/document/d/1s6ijRCCVNSvLnlC4andYPRJUUxveskF6c-2Km0sZdYU/edit?usp=sharing
+  media:
+    - purpose: icon
+      uri: ../screenshots/logo.png
+    - purpose: banner_graphic
+      uri: ../screenshots/banner.png
+release:
+  address: BbeXf5diazW9rQaVjbjMnWfKp9Geo9vc7tfbRS1uJxkc
+  media:
+    - purpose: icon
+      uri: ../screenshots/logo.png
+    - purpose: screenshot
+      uri: ../screenshots/1.png
+    - purpose: screenshot
+      uri: ../screenshots/2.png
+    - purpose: screenshot
+      uri: ../screenshots/3.png
+    - purpose: screenshot
+      uri: ../screenshots/4.png
+    - purpose: screenshot
+      uri: ../screenshots/5.png
+    - purpose: banner
+      uri: ../screenshots/banner.png
+  files:
+    - purpose: install
+      uri: ../release/release.apk
+  catalog:
+    en-US:
+      name: Clawly AI
+      short_description: Your AI Agent. Always On.
+      long_description: |-
+        Clawly AI connects you to your OpenClaw agent - a personal AI that runs on its own server, works 24/7, and actually does things for you.
+        Not just answers. Not just suggestions. Your agent books flights, sends emails, organizes your calendar, browses the web, and handles tasks while you sleep.
+        This isn't another chatbot. This is an AI with eyes and hands - running on a dedicated server, always on, always working for you.
+        YOUR AGENT. YOUR SERVER. REAL ACTIONS.
+        Your OpenClaw agent lives on its own machine. It has access to your tools, your files, your accounts. It doesn't forget. It doesn't stop. It doesn't wait for you to ask - it reaches out when something needs your attention.
+        Clawly is the fastest way to talk to your agent from anywhere.
+        WHAT YOUR AGENT CAN DO: - Book flights, hotels, and plan complete trips for you - Send and manage your emails automatically - Monitor your calendar and remind you proactively - Browse the web, fill forms, and extract information - Break down complex projects into step-by-step plans - Draft professional messages, reports, and summaries - Run code, debug issues, and open pull requests - Learn your preferences and get smarter over time
+        WHY CLAWLY: - Clean, fast mobile client for your OpenClaw agent - Full conversation history with persistent context - Switch between AI models depending on the task - Bring Your Own Key - you control your AI provider and costs
+        Other apps give you a chat window. Clawly gives you a direct line to an agent that never sleeps.
+        Clean interface. Fast responses. An agent that works for you 24/7.
+      new_in_version: |
+        Clawly AI 1.0 - Launch!
+        - Connect to your OpenClaw agent from anywhere
+        - Full conversation history with persistent context
+        - Switch between AI models depending on the task
+        - Bring Your Own Key support
+      saga_features: ''
+  android_details:
+    cert_fingerprint: 4837ba9acf762edff2f2f54dd01975c7840ffd24859907e6dd2dd9c06f0fb961
+    min_sdk: 28
+    version: 1.0.1
+    version_code: 17
+    locales:
+      - en-US
+      - af
+      - am
+      - ar
+      - as
+      - az
+      - be
+      - bg
+      - bn
+      - bs
+      - ca
+      - cs
+      - da
+      - de
+      - el
+      - en-AU
+      - en-CA
+      - en-GB
+      - en-IN
+      - en-XC
+      - es
+      - es-US
+      - et
+      - eu
+      - fa
+      - fi
+      - fr
+      - fr-CA
+      - gl
+      - gu
+      - hi
+      - hr
+      - hu
+      - hy
+      - in
+      - is
+      - it
+      - iw
+      - ja
+      - ka
+      - kk
+      - km
+      - kn
+      - ko
+      - ky
+      - lo
+      - lt
+      - lv
+      - mk
+      - ml
+      - mn
+      - mr
+      - ms
+      - my
+      - nb
+      - ne
+      - nl
+      - or
+      - pa
+      - pl
+      - pt
+      - pt-BR
+      - pt-PT
+      - ro
+      - ru
+      - si
+      - sk
+      - sl
+      - sq
+      - sr
+      - sr-Latn
+      - sv
+      - sw
+      - ta
+      - te
+      - th
+      - tl
+      - tr
+      - uk
+      - ur
+      - uz
+      - vi
+      - zh-CN
+      - zh-HK
+      - zh-TW
+      - zu
+solana_mobile_dapp_publisher_portal:
+  testing_instructions: Clawly AI connects you to your OpenClaw agent. Start by connecting your Solana wallet, then begin a conversation with your AI agent. You can ask it to perform tasks, switch between AI models, and maintain full conversation history. Test sending messages, receiving responses, and verifying persistent context across sessions.
+lastSubmittedVersionOnChain:
+  address: BbeXf5diazW9rQaVjbjMnWfKp9Geo9vc7tfbRS1uJxkc
+  version_code: 17
+  apk_hash: /saAfG5Dl1IeZr2lYWKOHGGbc5UAUroZSaM/Uh+hMUU=
+lastUpdatedVersionOnStore:
+  address: BbeXf5diazW9rQaVjbjMnWfKp9Geo9vc7tfbRS1uJxkc

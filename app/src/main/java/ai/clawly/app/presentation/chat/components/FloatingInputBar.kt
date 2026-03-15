@@ -44,9 +44,6 @@ fun FloatingInputBar(
     value: String,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
-    onInsertDebugPrompt: () -> Unit = {},
-    onInsertDebugSwapPrompt: () -> Unit = {},
-    showDebugPromptButton: Boolean = false,
     onAddAttachment: () -> Unit,
     onRemoveAttachment: (String) -> Unit,
     onAbort: () -> Unit,
@@ -119,44 +116,6 @@ fun FloatingInputBar(
             ) {
                 // Plus button for attachments (hidden when recording)
                 if (!isRecording) {
-                    if (showDebugPromptButton) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onInsertDebugPrompt()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "DBG",
-                                color = ClawlyColors.secondaryText,
-                                fontSize = 10.sp
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onInsertDebugSwapPrompt()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "SWP",
-                                color = ClawlyColors.secondaryText,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -255,33 +214,6 @@ private fun ActionButton(
     onMicClick: () -> Unit
 ) {
     when {
-        // Stop button when assistant is typing
-        isTyping -> {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(ClawlyColors.error)
-                    .clickable(enabled = !isAborting) { onAbort() },
-                contentAlignment = Alignment.Center
-            ) {
-                if (isAborting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Clear,
-                        contentDescription = "Stop",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-
         // Recording indicator
         isRecording -> {
             Box(
@@ -301,7 +233,7 @@ private fun ActionButton(
             }
         }
 
-        // Send button when there's content
+        // Send button always available when there's content
         hasContent -> {
             Box(
                 modifier = Modifier

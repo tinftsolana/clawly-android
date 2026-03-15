@@ -5,7 +5,7 @@ package ai.clawly.app.domain.model
  */
 sealed class StreamingState {
     data object Idle : StreamingState()
-    data class Streaming(val partialContent: String) : StreamingState()
+    data class Streaming(val partialContent: String, val runId: String? = null) : StreamingState()
     data object Complete : StreamingState()
 
     val isStreaming: Boolean get() = this is Streaming

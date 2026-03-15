@@ -50,7 +50,7 @@ class GatewayConnectionUseCase @Inject constructor(
         isAppForeground = true
         val current = connectionStatus.value
         Log.d(TAG, "onStart: current status = $current")
-        if (current !is ConnectionStatus.Online && current !is ConnectionStatus.Connecting) {
+        if (current !is ConnectionStatus.Online && current !is ConnectionStatus.Connecting && current !is ConnectionStatus.Paused) {
             Log.d(TAG, "App foregrounded, auto-reconnecting (was: $current)")
             scope.launch {
                 gatewayService.connect()

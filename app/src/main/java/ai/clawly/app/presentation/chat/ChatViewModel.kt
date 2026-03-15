@@ -85,6 +85,9 @@ class ChatViewModel @Inject constructor(
     private var signWsToken: String? = null
     private val pendingSignData = mutableMapOf<String, SolanaSignRequestUi>()
 
+    // Simple counter: incremented on send, decremented on response/error
+    private var pendingResponseCount = 0
+
     val assistantName = "Clawly"
 
     private val _userIdentity = MutableStateFlow<UserIdentity>(UserIdentity.NotAuthenticated)
@@ -179,6 +182,7 @@ class ChatViewModel @Inject constructor(
                         false
                     }
                     is ConnectionStatus.Offline -> false
+                    is ConnectionStatus.Paused -> false
                 }
 
                 _uiState.update {
@@ -190,8 +194,17 @@ class ChatViewModel @Inject constructor(
                 when (status) {
                     is ConnectionStatus.Online -> Log.d(TAG, "Connection status: Online")
                     is ConnectionStatus.Connecting -> Log.d(TAG, "Connection status: Connecting")
-                    is ConnectionStatus.Offline -> Log.d(TAG, "Connection status: Offline")
-                    is ConnectionStatus.Error -> Log.e(TAG, "Connection status: Error - ${status.message}")
+                    is ConnectionStatus.Offline -> {
+                        Log.d(TAG, "Connection status: Offline")
+                        pendingResponseCount = 0
+                        _uiState.update { it.copy(isAssistantTyping = false, streamingContent = "") }
+                    }
+                    is ConnectionStatus.Paused -> Log.d(TAG, "Connection status: Paused")
+                    is ConnectionStatus.Error -> {
+                        Log.e(TAG, "Connection status: Error - ${status.message}")
+                        pendingResponseCount = 0
+                        _uiState.update { it.copy(isAssistantTyping = false, streamingContent = "") }
+                    }
                 }
 
                 // Fetch history when first connecting
@@ -398,10 +411,10 @@ class ChatViewModel @Inject constructor(
                 Log.d(TAG, "Validation failed: no web3 credits")
                 return SendValidationResult.ShowPaywall
             }
-            // Also need to check connection for web3
+            // Also need to check connection for web3 — trigger reconnect instead of navigating away
             if (!state.isConnected) {
-                Log.d(TAG, "Validation failed: web3 not connected to gateway")
-                return SendValidationResult.ShowConfigPrompt
+                Log.d(TAG, "Validation failed: web3 not connected, triggering reconnect")
+                return SendValidationResult.GatewayReconnecting
             }
             // Web3 with credits and connected - allow
             return SendValidationResult.Allowed
@@ -551,6 +564,9 @@ class ChatViewModel @Inject constructor(
         }
 
         // Send via gateway
+        pendingResponseCount++
+        Log.d(TAG, "pendingResponseCount++ = $pendingResponseCount")
+
         viewModelScope.launch {
             val attachmentPayloads = attachments.map {
                 AttachmentPayload.fromImageData(it.data, it.fileName, it.mimeType)
@@ -565,6 +581,8 @@ class ChatViewModel @Inject constructor(
                 skills = enabledSkills,
                 attachments = attachmentPayloads
             ).onFailure { error ->
+                pendingResponseCount = (pendingResponseCount - 1).coerceAtLeast(0)
+                Log.d(TAG, "Send failed, pendingResponseCount-- = $pendingResponseCount")
                 handleSendError(error)
             }
         }
@@ -594,11 +612,18 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun handleIncomingMessage(message: GatewayMessage) {
-        val content = message.payload?.content
+        Log.d(TAG, "handleIncomingMessage: type=${message.type}")
 
+        // Each incoming message = one response received
+        pendingResponseCount = (pendingResponseCount - 1).coerceAtLeast(0)
+        Log.d(TAG, "pendingResponseCount-- = $pendingResponseCount")
+
+        val stillTyping = pendingResponseCount > 0
         _uiState.update {
-            it.copy(isAssistantTyping = false, streamingContent = "")
+            it.copy(isAssistantTyping = stillTyping, streamingContent = "")
         }
+
+        val content = message.payload?.content
 
         if (content.isNullOrEmpty()) {
             Log.d(TAG, "Received non-content message: ${message.type}")
@@ -1024,6 +1049,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             gatewayService.abortChat()
                 .onSuccess {
+                    pendingResponseCount = 0
                     _uiState.update {
                         it.copy(
                             isAborting = false,
@@ -1034,6 +1060,7 @@ class ChatViewModel @Inject constructor(
                     Log.d(TAG, "Response aborted")
                 }
                 .onFailure { error ->
+                    pendingResponseCount = 0
                     _uiState.update {
                         it.copy(
                             isAborting = false,
@@ -1061,6 +1088,7 @@ class ChatViewModel @Inject constructor(
 
         // Resend
         lastUserMessage?.let { message ->
+            pendingResponseCount++
             _uiState.update { it.copy(isAssistantTyping = true, streamingContent = "") }
 
             viewModelScope.launch {
@@ -1068,6 +1096,7 @@ class ChatViewModel @Inject constructor(
                     message = message,
                     thinkingLevel = _uiState.value.thinkingLevel
                 ).onFailure { error ->
+                    pendingResponseCount = (pendingResponseCount - 1).coerceAtLeast(0)
                     handleSendError(error)
                 }
             }

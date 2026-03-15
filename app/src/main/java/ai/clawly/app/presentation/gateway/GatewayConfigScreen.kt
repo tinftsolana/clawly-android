@@ -188,6 +188,7 @@ private fun ConnectionStatusBanner(status: ConnectionStatus) {
         is ConnectionStatus.Online -> "Connected" to ClawlyColors.success
         is ConnectionStatus.Connecting -> "Connecting..." to ClawlyColors.warning
         is ConnectionStatus.Offline -> "Offline" to ClawlyColors.secondaryText
+        is ConnectionStatus.Paused -> "Paused" to ClawlyColors.warning
         is ConnectionStatus.Error -> "Error: ${status.message}" to ClawlyColors.error
     }
 
