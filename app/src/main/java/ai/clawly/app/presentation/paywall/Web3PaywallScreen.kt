@@ -82,6 +82,7 @@ fun Web3PaywallScreen(
     onSelectPackage: (String) -> Unit,
     onPurchase: () -> Unit,
     onRestoreCredits: () -> Unit,
+    onRetryLoadOffers: () -> Unit = {},
     onDismiss: () -> Unit,
     onSuccessDismiss: () -> Unit = {}
 ) {
@@ -92,21 +93,12 @@ fun Web3PaywallScreen(
     var showCloseButton by remember { mutableStateOf(false) }
 
     val creditPackages = remember(offers) {
-        if (offers.isNotEmpty()) {
-            offers.map { offer ->
-                CreditPackage(
-                    id = offer.id,
-                    credits = offer.credits,
-                    priceSol = offer.getDisplayPrice().replace(" SOL", ""),
-                    pricePerCredit = offer.pricePerCredit ?: String.format("%.6f", offer.getLamports().toDouble() / 1_000_000_000 / offer.credits)
-                )
-            }
-        } else {
-            listOf(
-                CreditPackage("pack_test", 10, "0.001", "0.0001"),
-                CreditPackage("pack_1", 2000, "0.267", "0.000134"),
-                CreditPackage("pack_2", 5000, "0.533", "0.000107"),
-                CreditPackage("pack_3", 8000, "0.800", "0.0001")
+        offers.map { offer ->
+            CreditPackage(
+                id = offer.id,
+                credits = offer.credits,
+                priceSol = offer.getDisplayPrice().replace(" SOL", ""),
+                pricePerCredit = offer.pricePerCredit ?: String.format("%.6f", offer.getLamports().toDouble() / 1_000_000_000 / offer.credits)
             )
         }
     }
@@ -308,6 +300,29 @@ fun Web3PaywallScreen(
                                     color = ClawlyColors.accentPrimary,
                                     strokeWidth = 3.dp
                                 )
+                            }
+                        } else if (creditPackages.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = "Failed to load credit packages",
+                                    fontSize = 14.sp,
+                                    color = ClawlyColors.secondaryText
+                                )
+                                Button(
+                                    onClick = onRetryLoadOffers,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = ClawlyColors.accentPrimary
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Try Again", fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         } else {
                             Column(

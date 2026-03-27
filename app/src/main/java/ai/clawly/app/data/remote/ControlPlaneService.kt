@@ -73,7 +73,8 @@ data class UserResponse(
     val userId: String,
     val createdAt: String? = null,
     val updatedAt: String? = null,
-    val credits: Long = 0
+    val credits: Long = 0,
+    val creditsUsed: Long = 0
 )
 
 @Serializable
@@ -105,6 +106,29 @@ data class SignRequestResponse(
     val error: String? = null
 )
 
+@Serializable
+data class IntegrationResponse(
+    val id: String = "",
+    val name: String = "",
+    val icon: String = "",
+    val status: String = "unknown",
+    val configuredAt: String? = null
+)
+
+@Serializable
+data class IntegrationsListResponse(
+    val integrations: List<IntegrationResponse> = emptyList()
+)
+
+@Serializable
+data class RegisterPushTokenRequest(
+    val userId: String,
+    val token: String,
+    val platform: String,
+    val buildFlavor: String,
+    val appVersion: String
+)
+
 /**
  * Service for interacting with the control plane API
  * Matches iOS ControlPlaneService.swift exactly
@@ -116,7 +140,11 @@ class ControlPlaneService @Inject constructor(
     private val solanaAuthPreferences: SolanaAuthPreferences
 ) {
     companion object {
-        val BASE_URL = if (BuildConfig.IS_WEB3) "http://157.245.185.252:3004" else "http://157.245.185.252:3003"
+        val BASE_URL = when {
+            BuildConfig.IS_WEB3 -> "http://157.245.185.252:3004"
+            BuildConfig.DEBUG -> "http://157.245.185.252:3005"
+            else -> "http://157.245.185.252:3003"
+        }
     }
 
     private val json = Json {
@@ -299,6 +327,42 @@ class ControlPlaneService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Get instance error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get integrations for an instance
+     * GET /instances/{tenantId}/integrations with X-User-Id header
+     */
+    suspend fun getIntegrations(tenantId: String, userId: String): Result<List<IntegrationResponse>> {
+        return try {
+            val url = "$BASE_URL/instances/$tenantId/integrations"
+            Log.d(TAG, "GET $url (userId=$userId)")
+
+            val response = client.get(url) {
+                addAuthHeaders(userId)
+                addBypassTokenIfNeeded()
+            }
+
+            val rawBody = response.bodyAsText()
+            Log.d(TAG, "Integrations response: status=${response.status}, body=$rawBody")
+
+            if (response.status.isSuccess()) {
+                val body = try {
+                    json.decodeFromString<IntegrationsListResponse>(rawBody)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse integrations response: $rawBody", e)
+                    return Result.failure(e)
+                }
+                Log.d(TAG, "Parsed ${body.integrations.size} integrations: ${body.integrations}")
+                Result.success(body.integrations)
+            } else {
+                Log.e(TAG, "Get integrations failed: ${response.status} - $rawBody")
+                Result.failure(mapError(response.status.value, rawBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Get integrations error", e)
             Result.failure(e)
         }
     }
@@ -639,6 +703,37 @@ class ControlPlaneService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Get user error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Register/update push notification token for the given user
+     */
+    suspend fun registerPushToken(request: RegisterPushTokenRequest): Result<Unit> {
+        return try {
+            Log.d(
+                TAG,
+                "Registering push token for user=${request.userId.take(8)}..., build=${request.buildFlavor}"
+            )
+
+            val response = client.post("$BASE_URL/api/notifications/register") {
+                contentType(ContentType.Application.Json)
+                header("X-User-Id", request.userId)
+                addAuthHeaders(request.userId)
+                addBypassTokenIfNeeded()
+                setBody(request)
+            }
+
+            if (response.status.isSuccess()) {
+                Result.success(Unit)
+            } else {
+                val errorBody = response.bodyAsText()
+                Log.e(TAG, "Register push token failed: ${response.status} - $errorBody")
+                Result.failure(mapError(response.status.value, errorBody))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Register push token error", e)
             Result.failure(e)
         }
     }

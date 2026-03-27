@@ -10,9 +10,17 @@ data class TestCredentials(
     val gateway: String
 )
 
+data class CreditPackConfig(
+    val creditsAmount: Int,
+    val packId: String,
+    val priceLabel: String?
+)
+
 object RemoteConfigFlags {
     const val KEY_SELF_HOSTED_WITHOUT_PREMIUM = "self_hosted_without_premium_enabled"
     const val KEY_TEST_CREDENTIALS = "testCredentials"
+    const val KEY_CREDITS_PACKS = "credits_packs"
+    const val KEY_SHOW_RATE_DIALOG_IMMEDIATELY = "show_rate_dialog_immediately"
 
     fun isSelfHostedWithoutPremiumEnabled(): Boolean {
         return runCatching {
@@ -32,6 +40,32 @@ object RemoteConfigFlags {
                 gateway = obj.getString("gateway")
             )
         }.getOrNull()
+    }
+
+    /**
+     * Credit packs from Remote Config. Format:
+     * [{"creditsAmount":30000,"packId":"clawly.credits.pack.one","priceLabel":"$2.99"}, ...]
+     */
+    fun isShowRateDialogImmediately(): Boolean {
+        return runCatching {
+            FirebaseRemoteConfig.getInstance().getBoolean(KEY_SHOW_RATE_DIALOG_IMMEDIATELY)
+        }.getOrDefault(false)
+    }
+
+    fun getCreditPacks(): List<CreditPackConfig> {
+        return runCatching {
+            val json = FirebaseRemoteConfig.getInstance().getString(KEY_CREDITS_PACKS)
+            if (json.isBlank()) return emptyList()
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                CreditPackConfig(
+                    creditsAmount = obj.getInt("creditsAmount"),
+                    packId = obj.getString("packId"),
+                    priceLabel = obj.optString("priceLabel", null)
+                )
+            }
+        }.getOrDefault(emptyList())
     }
 }
 

@@ -56,3 +56,6 @@ object LoginRoute
 
 @Serializable
 object Web3PaywallRoute
+
+@Serializable
+data class SetupWizardRoute(val initialPrompt: String? = null)

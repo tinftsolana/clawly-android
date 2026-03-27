@@ -211,4 +211,56 @@ class PurchaseService @Inject constructor() {
     fun getPackageById(packageId: String): Package? {
         return currentOfferings?.current?.availablePackages?.find { it.identifier == packageId }
     }
+
+    /**
+     * Purchase a consumable product by its RevenueCat product ID.
+     * Returns true on success.
+     */
+    suspend fun purchaseConsumableByProductId(
+        activity: Activity,
+        productId: String
+    ): Result<Boolean> = suspendCancellableCoroutine { cont ->
+        // First fetch store products to get the StoreProduct
+        Purchases.sharedInstance.getProducts(
+            listOf(productId),
+            callback = object : GetStoreProductsCallback {
+                override fun onReceived(storeProducts: List<com.revenuecat.purchases.models.StoreProduct>) {
+                    val product = storeProducts.firstOrNull()
+                    if (product == null) {
+                        cont.resume(Result.failure(Exception("Product not found: $productId")))
+                        return
+                    }
+
+                    Purchases.sharedInstance.purchase(
+                        PurchaseParams.Builder(activity, product).build(),
+                        object : PurchaseCallback {
+                            override fun onCompleted(
+                                storeTransaction: StoreTransaction,
+                                customerInfo: CustomerInfo
+                            ) {
+                                updateSubscriptionStatus(customerInfo)
+                                Log.d(TAG, "Consumable purchase successful: $productId")
+                                cont.resume(Result.success(true))
+                            }
+
+                            override fun onError(error: PurchasesError, userCancelled: Boolean) {
+                                if (userCancelled) {
+                                    Log.d(TAG, "Consumable purchase cancelled")
+                                    cont.resume(Result.failure(Exception("Purchase cancelled")))
+                                } else {
+                                    Log.e(TAG, "Consumable purchase error: ${error.message}")
+                                    cont.resume(Result.failure(Exception(error.message)))
+                                }
+                            }
+                        }
+                    )
+                }
+
+                override fun onError(error: PurchasesError) {
+                    Log.e(TAG, "Error fetching product: ${error.message}")
+                    cont.resume(Result.failure(Exception(error.message)))
+                }
+            }
+        )
+    }
 }

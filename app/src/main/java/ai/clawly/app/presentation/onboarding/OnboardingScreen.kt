@@ -54,7 +54,8 @@ import kotlin.math.sin
 fun OnboardingScreen(
     onComplete: () -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val totalPages = if (BuildConfig.IS_WEB3) 4 else 3
+    val pagerState = rememberPagerState(pageCount = { totalPages })
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
@@ -131,15 +132,17 @@ fun OnboardingScreen(
                     0 -> OnboardingPage1()
                     1 -> OnboardingPage2()
                     2 -> OnboardingPage3()
+                    3 -> OnboardingPointsPage()
+                    else -> OnboardingPage3()
                 }
             }
 
             // Bottom section
             BottomSection(
                 currentPage = pagerState.currentPage,
-                totalPages = 3,
+                totalPages = totalPages,
                 onContinue = {
-                    if (pagerState.currentPage < 2) {
+                    if (pagerState.currentPage < totalPages - 1) {
                         scope.launch {
                             pagerState.animateScrollToPage(pagerState.currentPage + 1)
                         }
@@ -396,7 +399,13 @@ private fun OnboardingPage2() {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FloatingChip("", "Send SOL", 0.0, chipsFloating, iconRes = R.drawable.ic_solana)
+                        FloatingChip(
+                            "",
+                            "Send SOL",
+                            0.0,
+                            chipsFloating,
+                            iconRes = R.drawable.ic_solana
+                        )
                         FloatingChip("\uD83D\uDD04", "Swap", 0.3, chipsFloating)
                         FloatingChip("\uD83D\uDCB0", "Lend USDT", 0.6, chipsFloating)
                     }
@@ -458,7 +467,11 @@ private fun FloatingChip(
         initialValue = 4f,
         targetValue = -4f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = EaseInOut, delayMillis = (delayFraction * 1000).toInt()),
+            animation = tween(
+                1800,
+                easing = EaseInOut,
+                delayMillis = (delayFraction * 1000).toInt()
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "offset_$text"
@@ -557,6 +570,305 @@ private fun OnboardingPage3() {
         Spacer(modifier = Modifier.weight(1f))
     }
 }
+
+@Composable
+private fun OnboardingPointsPage() {
+    if (!BuildConfig.IS_WEB3) {
+        OnboardingPage3()
+        return
+    }
+
+    var showContent by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(300)
+        showContent = true
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(80.dp))
+
+        AnimatedVisibility(
+            visible = showContent,
+            enter = fadeIn() + slideInVertically { 20 }
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Introducing",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = ClawlyColors.secondaryText
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Clawly Points",
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ClawlyColors.accentPrimary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        AnimatedVisibility(
+            visible = showContent,
+            enter = fadeIn()
+        ) {
+            Box(modifier = Modifier.padding(horizontal = 20.dp)) {
+                PointsChatDemo()
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        AnimatedVisibility(
+            visible = showContent,
+            enter = fadeIn()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "\uD83D\uDCAC  Earn points by chatting and swapping",
+                    fontSize = 14.sp,
+                    color = ClawlyColors.secondaryText
+                )
+                Text(
+                    text = "\uD83D\uDD25  Keep your streak for bonus rewards",
+                    fontSize = 14.sp,
+                    color = ClawlyColors.secondaryText
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun PointsChatDemo() {
+    val chatCases = listOf(
+        Triple("Balance", "How many points do I have?", "You have 12,450 Clawly Points!"),
+        Triple("Earned", "Swap 10 USDC to SOL", "Swapped! +25 Clawly Points earned."),
+        Triple("Streak", "What's my streak?", "7-day streak! 2x point multiplier active."),
+        Triple(
+            "Rewards",
+            "What can I use points for?",
+            "Premium tools, boosts, and exclusive skills."
+        ),
+        Triple("Bonus", "Send 2 SOL to Alex", "Sent! +15 Clawly Points earned.")
+    )
+
+    var currentCaseIndex by remember { mutableIntStateOf(0) }
+    var usecaseText by remember { mutableStateOf("") }
+    var userText by remember { mutableStateOf("") }
+    var assistantText by remember { mutableStateOf("") }
+    var showUserBubble by remember { mutableStateOf(false) }
+    var showAssistantBubble by remember { mutableStateOf(false) }
+    var isRunning by remember { mutableStateOf(true) }
+
+    LaunchedEffect(currentCaseIndex, isRunning) {
+        if (!isRunning) return@LaunchedEffect
+
+        val currentCase = chatCases[currentCaseIndex]
+
+        showUserBubble = false
+        showAssistantBubble = false
+        userText = ""
+        assistantText = ""
+        usecaseText = ""
+
+        delay(100)
+
+        for (char in currentCase.first) {
+            if (!isRunning) return@LaunchedEffect
+            usecaseText += char
+            delay(60)
+        }
+
+        delay(200)
+
+        showUserBubble = true
+        for (char in currentCase.second) {
+            if (!isRunning) return@LaunchedEffect
+            userText += char
+            delay(40)
+        }
+
+        delay(400)
+
+        showAssistantBubble = true
+        for (char in currentCase.third) {
+            if (!isRunning) return@LaunchedEffect
+            assistantText += char
+            delay(25)
+        }
+
+        delay(1500)
+
+        currentCaseIndex = (currentCaseIndex + 1) % chatCases.size
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { isRunning = false }
+    }
+
+    // Chat window
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                ClawlyColors.surface,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .shadow(
+                elevation = 12.dp,
+                spotColor = Color.Black.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(16.dp)
+            )
+    ) {
+        Column {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ClawlyColors.surfaceElevated)
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.clawly),
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Clawly",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ClawlyColors.textPrimary
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(ClawlyColors.terminalGreen, CircleShape)
+                )
+            }
+
+            // Messages area
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .background(ClawlyColors.surface)
+                    .padding(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    if (showUserBubble && userText.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = userText,
+                                fontSize = 14.sp,
+                                color = ClawlyColors.textPrimary,
+                                modifier = Modifier
+                                    .background(
+                                        ClawlyColors.bubbleUser,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (showAssistantBubble) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Start,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.clawly),
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = assistantText.ifEmpty { "..." },
+                                fontSize = 14.sp,
+                                color = ClawlyColors.textPrimary,
+                                modifier = Modifier
+                                    .background(
+                                        ClawlyColors.bubbleAssistant,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Input area
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ClawlyColors.surface)
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Message Clawly...",
+                    fontSize = 13.sp,
+                    color = ClawlyColors.textMuted,
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(
+                            ClawlyColors.surfaceElevated,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(
+                            ClawlyColors.accentPrimary.copy(alpha = 0.4f),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .rotate(-90f)
+                    )
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun ChatDemo() {

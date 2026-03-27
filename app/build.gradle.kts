@@ -30,8 +30,8 @@ android {
         applicationId = "ai.clawly.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 17
-        versionName = "1.0.1"
+        versionCode = 20
+        versionName = "1.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -160,6 +160,7 @@ dependencies {
     implementation("com.solanamobile:rpc-core:0.2.7")
     // Kotlinx Serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.4")

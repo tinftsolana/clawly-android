@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +68,7 @@ fun FullSettingsScreen(
     onNavigateToInstanceSetup: () -> Unit,
     onNavigateToGatewayConfig: () -> Unit = {},
     onNavigateToWeb3Paywall: () -> Unit = {},
+    onNavigateToSetupWizard: (initialPrompt: String?) -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     walletViewModel: WalletViewModel = hiltViewModel()
 ) {
@@ -74,6 +76,7 @@ fun FullSettingsScreen(
     val walletUiState by walletViewModel.uiState.collectAsState()
     var showAdvanced by remember { mutableStateOf(false) }
     var showDisconnectConfirmation by remember { mutableStateOf(false) }
+    var selectedIntegration by remember { mutableStateOf<IntegrationInfo?>(null) }
 
     // Refresh auth config every time screen resumes (back from setup, etc.)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -254,11 +257,23 @@ fun FullSettingsScreen(
                             }
                         }
                     )
-                }
             }
+        }
 
-            // WALLET Section (Web3 only) - right after CLAWLY
-            DrawIfWeb3 {
+        DrawIfWeb3 {
+            val showUsageSummary = config.hostingType == HostingType.Managed && config.isConfigured
+            if (showUsageSummary) {
+                Spacer(modifier = Modifier.height(12.dp))
+                UsageSummaryBanner(
+                    pointsText = if (uiState.isLoadingCredits) "—" else uiState.pointsFormatted,
+                    isLoading = uiState.isLoadingCredits,
+                    onRefresh = { viewModel.fetchCredits() }
+                )
+            }
+        }
+
+        // WALLET Section (Web3 only) - right after CLAWLY
+        DrawIfWeb3 {
                 SettingsSection(title = "WALLET") {
                     if (walletUiState.isWalletConnected) {
                         // Connected state - show wallet info, credits, and options
@@ -358,25 +373,63 @@ fun FullSettingsScreen(
             val isAgentConfigured = config.isConfigured
             SettingsSection(title = "AGENT") {
                 SettingsRow(
-                    icon = Icons.Default.Star,
+                    icon = Icons.Default.Build,
                     iconTint = if (isAgentConfigured) ClawlyColors.accentPrimary else ClawlyColors.textMuted,
-                    title = "Skills",
-                    subtitle = if (isAgentConfigured) "Manage agent capabilities" else "Configure Clawly first",
+                    title = "Setup Wizard",
+                    subtitle = if (isAgentConfigured) "Set up integrations with AI guidance" else "Configure Clawly first",
                     enabled = isAgentConfigured,
-                    onClick = if (isAgentConfigured) onNavigateToSkills else null
-                )
-                SettingsDivider()
-                SettingsRow(
-                    icon = Icons.Default.Lock,
-                    iconTint = if (isAgentConfigured) ClawlyColors.accentPrimary else ClawlyColors.textMuted,
-                    title = "API Keys",
-                    subtitle = if (isAgentConfigured) "Configure secrets for skills" else "Configure Clawly first",
-                    enabled = isAgentConfigured,
-                    onClick = if (isAgentConfigured) onNavigateToApiKeys else null
+                    onClick = if (isAgentConfigured) { { onNavigateToSetupWizard(null) } } else null
                 )
             }
 
-            // SUBSCRIPTION Section (only for self-hosted or no hosting)
+            // INTEGRATIONS Section
+            if (isAgentConfigured) {
+                LaunchedEffect(Unit) {
+                    viewModel.fetchIntegrationsIfNeeded()
+                }
+
+                SettingsSection(title = "INTEGRATIONS") {
+                    if (uiState.isLoadingIntegrations) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = ClawlyColors.accentPrimary,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Loading integrations...",
+                                fontSize = 14.sp,
+                                color = ClawlyColors.secondaryText
+                            )
+                        }
+                    } else if (uiState.integrations.isEmpty()) {
+                        SettingsRow(
+                            icon = Icons.Default.Add,
+                            iconTint = ClawlyColors.accentPrimary,
+                            title = "0 integrations",
+                            subtitle = "Set up integration",
+                            onClick = { onNavigateToSetupWizard(null) }
+                        )
+                    } else {
+                        uiState.integrations.forEachIndexed { index, integration ->
+                            IntegrationRow(
+                                integration = integration,
+                                onClick = { selectedIntegration = integration }
+                            )
+                            if (index < uiState.integrations.size - 1) {
+                                SettingsDivider()
+                            }
+                        }
+                    }
+                }
+            }
+
             // ABOUT Section
             SettingsSection(title = "ABOUT") {
                 SettingsRow(
@@ -416,6 +469,17 @@ fun FullSettingsScreen(
                             data = Uri.parse("mailto:clawlyagent@clawlyai.io")
                             putExtra(Intent.EXTRA_SUBJECT, "Clawly App Feedback")
                         }
+                        context.startActivity(intent)
+                    }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    icon = Icons.Default.Share,
+                    iconTint = ClawlyColors.accentPrimary,
+                    title = "Follow us on X",
+                    subtitle = "@clawly_agent",
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://x.com/clawly_agent"))
                         context.startActivity(intent)
                     }
                 )
@@ -496,6 +560,38 @@ fun FullSettingsScreen(
                             uiState = uiState,
                             viewModel = viewModel
                         )
+                    }
+                }
+            }
+
+            // Device Info
+            if (uiState.userId.isNotEmpty() || uiState.deviceId.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (uiState.userId.isNotEmpty()) {
+                        SelectionContainer {
+                            Text(
+                                text = "User ID: ${uiState.userId}",
+                                fontSize = 11.sp,
+                                color = ClawlyColors.textMuted.copy(alpha = 0.6f),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                    if (uiState.deviceId.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        SelectionContainer {
+                            Text(
+                                text = "Machine ID: ${uiState.deviceId}",
+                                fontSize = 11.sp,
+                                color = ClawlyColors.textMuted.copy(alpha = 0.6f),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }
@@ -690,6 +786,126 @@ fun FullSettingsScreen(
                 }
             }
         )
+    }
+
+    // Integration Actions Bottom Sheet
+    selectedIntegration?.let { integration ->
+        ModalBottomSheet(
+            onDismissRequest = { selectedIntegration = null },
+            containerColor = ClawlyColors.surface,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp)
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                ) {
+                    Text(
+                        text = integration.icon.ifEmpty { "\uD83D\uDD27" },
+                        fontSize = 28.sp
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = integration.name,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ClawlyColors.textPrimary
+                        )
+                        Text(
+                            text = integration.status.replaceFirstChar { it.uppercase() },
+                            fontSize = 13.sp,
+                            color = ClawlyColors.secondaryText
+                        )
+                    }
+                }
+
+                // Chat about integration
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ClawlyColors.surfaceElevated)
+                        .clickable {
+                            selectedIntegration = null
+                            onNavigateToSetupWizard(
+                                "I want to chat about my ${integration.name} integration (${integration.id}). " +
+                                "It's currently ${integration.status}. Help me configure or troubleshoot it."
+                            )
+                        }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = null,
+                        tint = ClawlyColors.accentPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Chat about integration",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = ClawlyColors.textPrimary
+                        )
+                        Text(
+                            text = "Configure or troubleshoot with AI",
+                            fontSize = 12.sp,
+                            color = ClawlyColors.secondaryText
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Remove integration
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ClawlyColors.error.copy(alpha = 0.1f))
+                        .clickable {
+                            selectedIntegration = null
+                            onNavigateToSetupWizard(
+                                "I want to remove the ${integration.name} integration (${integration.id}). " +
+                                "Please disconnect it, remove all its configuration, API keys and environment variables, " +
+                                "and remove it from /data/.openclaw/integrations.json."
+                            )
+                        }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = null,
+                        tint = ClawlyColors.error,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Remove integration",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = ClawlyColors.error
+                        )
+                        Text(
+                            text = "Disconnect and remove all config",
+                            fontSize = 12.sp,
+                            color = ClawlyColors.error.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1527,6 +1743,59 @@ private fun SettingsDivider() {
 }
 
 @Composable
+private fun UsageSummaryBanner(
+    pointsText: String,
+    isLoading: Boolean,
+    onRefresh: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(ClawlyColors.surfaceElevated)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(id = ai.clawly.app.R.drawable.clawly),
+            contentDescription = null,
+            modifier = Modifier.size(36.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Clawly Points",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ClawlyColors.textPrimary
+            )
+            Text(
+                text = if (isLoading) "Loading..." else "$pointsText pts",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = ClawlyColors.accentPrimary
+            )
+        }
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = ClawlyColors.accentPrimary,
+                strokeWidth = 2.dp
+            )
+        } else {
+            IconButton(onClick = onRefresh) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = ClawlyColors.textMuted
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatusIndicatorDot(
     color: Color,
     label: String
@@ -1668,4 +1937,58 @@ private fun getConnectionStatusText(status: ConnectionStatus): String = when (st
     is ConnectionStatus.Offline -> "Offline"
     is ConnectionStatus.Paused -> "Paused"
     is ConnectionStatus.Error -> "Error"
+}
+
+@Composable
+private fun IntegrationRow(integration: IntegrationInfo, onClick: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Emoji icon
+        Text(
+            text = integration.icon.ifEmpty { "\uD83D\uDD27" },
+            fontSize = 22.sp,
+            modifier = Modifier.width(32.dp)
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = integration.name,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = ClawlyColors.textPrimary
+            )
+            Text(
+                text = integration.id,
+                fontSize = 12.sp,
+                color = ClawlyColors.secondaryText
+            )
+        }
+
+        // Status badge
+        val statusColor = when (integration.status) {
+            "connected" -> ClawlyColors.terminalGreen
+            "error", "disconnected" -> ClawlyColors.error
+            else -> ClawlyColors.warning
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(statusColor.copy(alpha = 0.15f))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = integration.status.replaceFirstChar { it.uppercase() },
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = statusColor
+            )
+        }
+    }
 }

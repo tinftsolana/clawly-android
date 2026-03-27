@@ -111,13 +111,14 @@ fun FloatingInputBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Plus button for attachments (hidden when recording)
                 if (!isRecording) {
                     Box(
                         modifier = Modifier
+                            .padding(bottom = 2.dp)
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.08f))
@@ -159,8 +160,8 @@ fun FloatingInputBar(
                         decorationBox = { innerTextField ->
                             Box(
                                 modifier = Modifier
-                                    .defaultMinSize(minHeight = 32.dp)
-                                    .padding(vertical = 6.dp),
+                                    .defaultMinSize(minHeight = 36.dp)
+                                    .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 if (value.isEmpty()) {
@@ -179,25 +180,27 @@ fun FloatingInputBar(
                     )
                 }
 
-                // Action button (send/mic/stop)
-                ActionButton(
-                    hasContent = hasContent,
-                    isTyping = isAssistantTyping,
-                    isAborting = isAborting,
-                    isRecording = isRecording,
-                    onSend = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSend()
-                    },
-                    onAbort = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAbort()
-                    },
-                    onMicClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onMicClick()
-                    }
-                )
+                // Action button (send/mic/stop) — stays bottom-aligned
+                Box(modifier = Modifier.padding(bottom = 2.dp)) {
+                    ActionButton(
+                        hasContent = hasContent,
+                        isTyping = isAssistantTyping,
+                        isAborting = isAborting,
+                        isRecording = isRecording,
+                        onSend = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onSend()
+                        },
+                        onAbort = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAbort()
+                        },
+                        onMicClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onMicClick()
+                        }
+                    )
+                }
             }
         }
     }

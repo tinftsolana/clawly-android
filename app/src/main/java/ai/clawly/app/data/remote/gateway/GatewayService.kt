@@ -31,6 +31,9 @@ interface GatewayService {
     /** Emits requestId when gateway broadcasts pairing request event */
     val pairingRequested: Flow<String>
 
+    /** RunIds whose responses should not appear in main chat */
+    val silentRunIds: MutableSet<String>
+
     /** Connect to the gateway */
     suspend fun connect()
 

@@ -22,6 +22,7 @@ fun MessageList(
     onSignRequest: () -> Unit,
     onRejectSignRequest: () -> Unit,
     onOpenSolscan: (String) -> Unit,
+    onApiKeyClick: (() -> Unit)? = null,
     listState: LazyListState,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp)
@@ -52,6 +53,12 @@ fun MessageList(
             key = { it.id }
         ) { message ->
             when {
+                message.content.startsWith("__api_key_request__:") && onApiKeyClick != null -> {
+                    ApiKeyRequestBubble(
+                        message = message,
+                        onClick = onApiKeyClick
+                    )
+                }
                 message.isSignRequest -> {
                     SignRequestBubble(
                         state = message.signRequestState!!,
@@ -81,19 +88,20 @@ fun MessageList(
 /**
  * Auto-scroll to bottom (index 0 in reverse layout).
  * Since reverseLayout = true, the list naturally starts at the bottom.
- * We only need to scroll on new messages / typing changes.
+ * We scroll on new messages, typing changes, streaming content updates, and keyboard visibility.
  */
 @Composable
 fun rememberAutoScrollState(
     messages: List<ChatMessage>,
     isTyping: Boolean,
+    streamingContent: String = "",
     imeVisible: Boolean = false
 ): LazyListState {
     val listState = rememberLazyListState()
 
-    // Scroll to bottom (index 0) when new messages arrive or typing changes
-    LaunchedEffect(messages.size, isTyping) {
-        if (messages.isNotEmpty()) {
+    // Scroll to bottom when new messages arrive, typing changes, or streaming content grows
+    LaunchedEffect(messages.size, isTyping, streamingContent) {
+        if (messages.isNotEmpty() || isTyping) {
             delay(50)
             listState.animateScrollToItem(0)
         }
@@ -101,7 +109,7 @@ fun rememberAutoScrollState(
 
     // Scroll when keyboard opens/closes
     LaunchedEffect(imeVisible) {
-        if (messages.isNotEmpty()) {
+        if (messages.isNotEmpty() || isTyping) {
             delay(100)
             listState.animateScrollToItem(0)
         }

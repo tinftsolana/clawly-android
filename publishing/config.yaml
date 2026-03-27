@@ -7,7 +7,7 @@ publisher:
     - purpose: icon
       uri: ../screenshots/logo.png
 app:
-  name: Clawly AI
+  name: Clawly AI - OpenClaw dApp
   address: FnDRDHcC8h94u3dRBcFXKH21hxdMr7ynVipHtxYFxpze
   android_package: ai.clawly.app
   urls:
@@ -21,7 +21,7 @@ app:
     - purpose: banner_graphic
       uri: ../screenshots/banner.png
 release:
-  address: BbeXf5diazW9rQaVjbjMnWfKp9Geo9vc7tfbRS1uJxkc
+  address: 2ZFqjYHq5H1bVwgKVrQmSG9MKmPYYKr2XQMYSeufRG9x
   media:
     - purpose: icon
       uri: ../screenshots/logo.png
@@ -42,7 +42,7 @@ release:
       uri: ../release/release.apk
   catalog:
     en-US:
-      name: Clawly AI
+      name: Clawly AI - OpenClaw dApp
       short_description: Your AI Agent. Always On.
       long_description: |-
         Clawly AI connects you to your OpenClaw agent - a personal AI that runs on its own server, works 24/7, and actually does things for you.
@@ -65,8 +65,8 @@ release:
   android_details:
     cert_fingerprint: 4837ba9acf762edff2f2f54dd01975c7840ffd24859907e6dd2dd9c06f0fb961
     min_sdk: 28
-    version: 1.0.1
-    version_code: 17
+    version: 1.0.4
+    version_code: 20
     locales:
       - en-US
       - af
@@ -157,8 +157,8 @@ release:
 solana_mobile_dapp_publisher_portal:
   testing_instructions: Clawly AI connects you to your OpenClaw agent. Start by connecting your Solana wallet, then begin a conversation with your AI agent. You can ask it to perform tasks, switch between AI models, and maintain full conversation history. Test sending messages, receiving responses, and verifying persistent context across sessions.
 lastSubmittedVersionOnChain:
-  address: BbeXf5diazW9rQaVjbjMnWfKp9Geo9vc7tfbRS1uJxkc
-  version_code: 17
-  apk_hash: /saAfG5Dl1IeZr2lYWKOHGGbc5UAUroZSaM/Uh+hMUU=
+  address: 2ZFqjYHq5H1bVwgKVrQmSG9MKmPYYKr2XQMYSeufRG9x
+  version_code: 20
+  apk_hash: pIX67Xwbny4BdWwhrgFB3eFjbheJEB71OzdhCetzJGc=
 lastUpdatedVersionOnStore:
-  address: BbeXf5diazW9rQaVjbjMnWfKp9Geo9vc7tfbRS1uJxkc
+  address: 2ZFqjYHq5H1bVwgKVrQmSG9MKmPYYKr2XQMYSeufRG9x

@@ -3,9 +3,11 @@ package ai.clawly.app.presentation.paywall
 import android.app.Activity
 import android.util.Log
 import ai.clawly.app.data.remote.ControlPlaneService
+import ai.clawly.app.data.remote.RemoteConfigFlags
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.service.ProductInfo
 import ai.clawly.app.data.service.PurchaseService
+import ai.clawly.app.domain.usecase.Web2CreditsUseCase
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,6 +34,12 @@ data class SubscriptionProduct(
     val description: String
 )
 
+data class CreditPack(
+    val id: String,
+    val creditsAmount: Int,
+    val priceLabel: String
+)
+
 data class PaywallUiState(
     val products: List<SubscriptionProduct> = emptyList(),
     val isLoading: Boolean = false,
@@ -42,14 +50,21 @@ data class PaywallUiState(
     val showError: Boolean = false,
     val error: String? = null,
     val monthlyPrice: String = "$9.99",
-    val yearlyPrice: String = "$49.99"
+    val yearlyPrice: String = "$49.99",
+    // Credit packs
+    val creditPacks: List<CreditPack> = emptyList(),
+    val selectedCreditPackId: String? = null,
+    val isPurchasingCredits: Boolean = false,
+    val creditPurchaseSuccess: Boolean = false,
+    val currentCreditsDisplay: String = ""
 )
 
 @HiltViewModel
 class PaywallViewModel @Inject constructor(
     private val purchaseService: PurchaseService,
     private val controlPlaneService: ControlPlaneService,
-    private val deviceIdentityManager: DeviceIdentityManager
+    private val deviceIdentityManager: DeviceIdentityManager,
+    private val web2CreditsUseCase: Web2CreditsUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PaywallUiState())
@@ -57,7 +72,17 @@ class PaywallViewModel @Inject constructor(
 
     init {
         loadProducts()
+        loadCreditPacks()
         observeSubscriptionStatus()
+        observeCredits()
+    }
+
+    private fun observeCredits() {
+        viewModelScope.launch {
+            web2CreditsUseCase.displayStringFlow.collect { display ->
+                _uiState.update { it.copy(currentCreditsDisplay = display) }
+            }
+        }
     }
 
     private fun observeSubscriptionStatus() {
@@ -245,6 +270,7 @@ class PaywallViewModel @Inject constructor(
             controlPlaneService.syncPurchases(userId).fold(
                 onSuccess = { credits ->
                     Log.d(TAG, "syncPurchases success: credits=$credits")
+                    web2CreditsUseCase.setCredits(credits)
                 },
                 onFailure = { e ->
                     Log.e(TAG, "syncPurchases failed", e)
@@ -255,5 +281,66 @@ class PaywallViewModel @Inject constructor(
 
     private suspend fun resolveSyncUserId(): String? {
         return deviceIdentityManager.loadOrCreateIdentity()?.deviceId
+    }
+
+    // --- Credit Packs ---
+
+    private fun loadCreditPacks() {
+        val packConfigs = RemoteConfigFlags.getCreditPacks()
+        if (packConfigs.isEmpty()) {
+            Log.d(TAG, "No credit packs in RemoteConfig")
+            return
+        }
+
+        val packs = packConfigs
+            .sortedBy { it.creditsAmount }
+            .map { CreditPack(id = it.packId, creditsAmount = it.creditsAmount, priceLabel = it.priceLabel ?: "...") }
+
+        _uiState.update {
+            it.copy(
+                creditPacks = packs,
+                selectedCreditPackId = packs.firstOrNull()?.id
+            )
+        }
+        Log.d(TAG, "Loaded ${packs.size} credit packs from RemoteConfig")
+    }
+
+    fun selectCreditPack(packId: String) {
+        _uiState.update { it.copy(selectedCreditPackId = packId) }
+    }
+
+    fun purchaseCreditPack(activity: Activity) {
+        val pack = _uiState.value.creditPacks.find { it.id == _uiState.value.selectedCreditPackId }
+        if (pack == null) {
+            _uiState.update { it.copy(error = "No credit pack selected", showError = true) }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPurchasingCredits = true) }
+
+            purchaseService.purchaseConsumableByProductId(activity, pack.id)
+                .onSuccess {
+                    Log.d(TAG, "Credit pack purchase successful: ${pack.id}")
+                    _uiState.update { it.copy(isPurchasingCredits = false, creditPurchaseSuccess = true) }
+                    // Sync with backend to get updated credit balance
+                    syncPurchasesToBackend()
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Credit pack purchase failed", error)
+                    val isCancelled = error.message?.contains("cancelled", ignoreCase = true) == true
+                    _uiState.update {
+                        it.copy(
+                            isPurchasingCredits = false,
+                            error = if (isCancelled) null else error.message,
+                            showError = !isCancelled
+                        )
+                    }
+                }
+        }
+    }
+
+    fun resetCreditPurchaseSuccess() {
+        _uiState.update { it.copy(creditPurchaseSuccess = false) }
     }
 }

@@ -35,6 +35,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
+data class IntegrationInfo(
+    val id: String,
+    val name: String,
+    val icon: String,
+    val status: String,
+    val configuredAt: String? = null
+)
+
 data class SettingsUiState(
     val ttsEnabled: Boolean = false,
     val selectedVoiceId: String? = null,
@@ -51,6 +59,7 @@ data class SettingsUiState(
     val error: String? = null,
     // Credits (for managed hosting with OpenClaw proxy)
     val credits: Long = 0,
+    val allTimeCreditUsed: Long = 0,
     val isLoadingCredits: Boolean = false,
     val isAddingDebugCredits: Boolean = false,
     val debugCreditsResult: String? = null,
@@ -63,6 +72,7 @@ data class SettingsUiState(
     val useBypassToken: Boolean = false,
     val bypassToken: String = "",
     val userId: String = "",
+    val deviceId: String = "",
     // Firebase account info (web2)
     val firebaseUserName: String? = null,
     val firebaseUserEmail: String? = null,
@@ -81,16 +91,26 @@ data class SettingsUiState(
     val showPendingSignRequestsDialog: Boolean = false,
     val pendingSignRequestsError: String? = null,
     val pendingSignRequests: List<SignRequestResponse> = emptyList(),
-    val processingSignRequestId: String? = null
+    val processingSignRequestId: String? = null,
+    // Connected integrations
+    val integrations: List<IntegrationInfo> = emptyList(),
+    val isLoadingIntegrations: Boolean = false
 ) {
     /** Format credits for display (e.g., 1,000,000 → "1.0M") */
     val creditsFormatted: String
-        get() = when {
-            credits >= 1_000_000_000 -> String.format("%.1fB", credits / 1_000_000_000.0)
-            credits >= 1_000_000 -> String.format("%.1fM", credits / 1_000_000.0)
-            credits >= 1_000 -> String.format("%.1fK", credits / 1_000.0)
-            else -> credits.toString()
+        get() = formatLargeNumber(credits)
+
+    val pointsFormatted: String
+        get() = formatLargeNumber(allTimeCreditUsed)
+
+    private fun formatLargeNumber(value: Long): String {
+        return when {
+            value >= 1_000_000_000 -> String.format("%.1fB", value / 1_000_000_000.0)
+            value >= 1_000_000 -> String.format("%.1fM", value / 1_000_000.0)
+            value >= 1_000 -> String.format("%.1fK", value / 1_000.0)
+            else -> value.toString()
         }
+    }
 }
 
 enum class AIProviderType(
@@ -167,6 +187,8 @@ class SettingsViewModel @Inject constructor(
             return identity?.deviceId ?: "android-${System.currentTimeMillis()}"
         }
 
+    private var hasFetchedIntegrations = false
+
     init {
         loadSettings()
         loadUserId()
@@ -201,11 +223,13 @@ class SettingsViewModel @Inject constructor(
                     }
                     is UserWalletDetails.NotConnected -> {
                         android.util.Log.d("SettingsViewModel", "Wallet disconnected")
+                        val fallbackId = deviceIdentityManager.loadOrCreateIdentity()?.deviceId ?: ""
                         _uiState.update {
                             it.copy(
-                                userId = "",
+                                userId = fallbackId,
                                 hasValidJwt = false,
-                                credits = 0
+                                credits = 0,
+                                allTimeCreditUsed = 0
                             )
                         }
                     }
@@ -239,7 +263,8 @@ class SettingsViewModel @Inject constructor(
     private fun loadUserId() {
         viewModelScope.launch {
             val userId = currentUserId
-            _uiState.update { it.copy(userId = userId) }
+            val identity = deviceIdentityManager.loadOrCreateIdentity()
+            _uiState.update { it.copy(userId = userId, deviceId = identity?.deviceId ?: "") }
         }
     }
 
@@ -497,6 +522,7 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             credits = user.credits,
+                            allTimeCreditUsed = user.creditsUsed,
                             isLoadingCredits = false
                         )
                     }
@@ -561,13 +587,29 @@ class SettingsViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
+            // Disconnect gateway and clear all connection config
+            gatewayConnectionUseCase.disconnect()
             authProviderRepository.clearConfig()
             chatRepository.clearMessages()
-            gatewayConnectionUseCase.disconnect()
+
+            // Clear WSS credentials so a fresh setup is required
+            preferences.setDeviceToken(null)
+            preferences.clearSelfHostedInfo()
+            preferences.clearManagedInfo()
+            preferences.clearBackendUserId()
+
             if (BuildConfig.IS_WEB3) {
                 web3CreditsUseCase.setCredits(0)
             }
-            _uiState.update { it.copy(credits = 0) }
+            _uiState.update {
+                it.copy(
+                    credits = 0,
+                    allTimeCreditUsed = 0,
+                    integrations = emptyList(),
+                    connectedProvider = null
+                )
+            }
+            hasFetchedIntegrations = false
         }
     }
 
@@ -1079,4 +1121,59 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+
+    // --- Integrations tracking ---
+
+    fun fetchIntegrations() {
+        if (_uiState.value.isLoadingIntegrations) {
+            android.util.Log.d("SettingsViewModel", "fetchIntegrations: already loading, skipping")
+            return
+        }
+        val tenantId = currentTenantId
+        if (tenantId == null) {
+            android.util.Log.w("SettingsViewModel", "fetchIntegrations: no tenantId available")
+            return
+        }
+
+        val userId = currentUserId
+        android.util.Log.d("SettingsViewModel", "fetchIntegrations: tenantId=$tenantId, userId=$userId")
+        _uiState.update { it.copy(isLoadingIntegrations = true) }
+
+        viewModelScope.launch {
+            controlPlaneService.getIntegrations(tenantId, userId).fold(
+                onSuccess = { integrations ->
+                    android.util.Log.d("SettingsViewModel", "fetchIntegrations: got ${integrations.size} integrations")
+                    integrations.forEach { r ->
+                        android.util.Log.d("SettingsViewModel", "  integration: id=${r.id}, name=${r.name}, status=${r.status}")
+                    }
+                    _uiState.update {
+                        it.copy(
+                            isLoadingIntegrations = false,
+                            integrations = integrations.map { resp ->
+                                IntegrationInfo(
+                                    id = resp.id,
+                                    name = resp.name,
+                                    icon = resp.icon,
+                                    status = resp.status,
+                                    configuredAt = resp.configuredAt
+                                )
+                            }
+                        )
+                    }
+                    hasFetchedIntegrations = true
+                },
+                onFailure = { e ->
+                    android.util.Log.e("SettingsViewModel", "fetchIntegrations: failed", e)
+                    _uiState.update { it.copy(isLoadingIntegrations = false) }
+                }
+            )
+        }
+    }
+
+    fun fetchIntegrationsIfNeeded() {
+        if (!hasFetchedIntegrations) {
+            fetchIntegrations()
+        }
+    }
+
 }

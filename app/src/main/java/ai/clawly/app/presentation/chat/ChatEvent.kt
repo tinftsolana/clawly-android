@@ -15,4 +15,5 @@ sealed class ChatEvent {
     data object ScrollToBottom : ChatEvent()
     data object MessageSent : ChatEvent()
     data class SpeakText(val text: String) : ChatEvent()
+    data object RequestInAppReview : ChatEvent()
 }

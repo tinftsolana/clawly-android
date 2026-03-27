@@ -13,7 +13,9 @@ import ai.clawly.app.presentation.paywall.Web3PaywallViewModel
 import ai.clawly.app.presentation.settings.AuthProviderScreen
 import ai.clawly.app.presentation.settings.FullSettingsScreen
 import ai.clawly.app.presentation.settings.InstanceSetupScreen
+import ai.clawly.app.presentation.setupwizard.SetupWizardScreen
 import ai.clawly.app.presentation.skills.SkillsScreen
+import androidx.navigation.toRoute
 import ai.clawly.app.ui.theme.ClawlyColors
 import android.app.Activity
 import android.content.Intent
@@ -122,6 +124,9 @@ fun ClawlyNavHost(
                 },
                 onNavigateToLogin = {
                     navController.navigate(LoginRoute)
+                },
+                onNavigateToSetupWizard = {
+                    navController.navigate(SetupWizardRoute())
                 }
             )
         }
@@ -169,7 +174,23 @@ fun ClawlyNavHost(
                 },
                 onNavigateToWeb3Paywall = {
                     navController.navigate(Web3PaywallRoute)
+                },
+                onNavigateToSetupWizard = { initialPrompt ->
+                    navController.navigate(SetupWizardRoute(initialPrompt = initialPrompt))
                 }
+            )
+        }
+
+        // Setup Wizard
+        composable<SetupWizardRoute> { backStackEntry ->
+            val route = backStackEntry.toRoute<SetupWizardRoute>()
+            SetupWizardScreen(
+                onBackClick = {
+                    if (navController.currentBackStackEntry != null) {
+                        navController.popBackStack()
+                    }
+                },
+                initialPrompt = route.initialPrompt
             )
         }
 
@@ -322,6 +343,7 @@ fun ClawlyNavHost(
                 onSelectPackage = { viewModel.selectPackage(it) },
                 onPurchase = { viewModel.purchaseCredits() },
                 onRestoreCredits = { viewModel.restoreCredits() },
+                onRetryLoadOffers = { viewModel.refreshOffers() },
                 onDismiss = {
                     // Go to chat after dismissing
                     navController.navigate(ChatRoute) {

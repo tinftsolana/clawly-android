@@ -19,6 +19,7 @@ import ai.clawly.app.domain.usecase.ConnectWalletUseCase
 import ai.clawly.app.domain.usecase.GatewayConnectionUseCase
 import ai.clawly.app.domain.usecase.GetUserIdentityUseCase
 import ai.clawly.app.domain.usecase.UserIdentity
+import ai.clawly.app.domain.usecase.Web2CreditsUseCase
 import ai.clawly.app.domain.usecase.Web3CreditsUseCase
 import android.util.Log
 import android.util.Base64
@@ -57,6 +58,7 @@ class ChatViewModel @Inject constructor(
     private val skillsManager: SkillsManager,
     private val getUserIdentityUseCase: GetUserIdentityUseCase,
     private val web3CreditsUseCase: Web3CreditsUseCase,
+    private val web2CreditsUseCase: Web2CreditsUseCase,
     private val connectWalletUseCase: ConnectWalletUseCase,
     private val gatewayConnectionUseCase: GatewayConnectionUseCase,
     private val firebaseAuthService: FirebaseAuthService,
@@ -96,6 +98,9 @@ class ChatViewModel @Inject constructor(
     private val _web3Credits = MutableStateFlow(0)
     val web3Credits: StateFlow<Int> = _web3Credits.asStateFlow()
 
+    private val _web2Credits = MutableStateFlow(0L)
+    val web2Credits: StateFlow<Long> = _web2Credits.asStateFlow()
+
     private companion object {
         const val SIGN_STATUS_POLL_ATTEMPTS = 20
         const val SIGN_STATUS_POLL_DELAY_MS = 1500L
@@ -108,7 +113,11 @@ class ChatViewModel @Inject constructor(
         if (BuildConfig.IS_WEB3) {
             observeWeb3Credits()
         }
+        if (BuildConfig.IS_WEB2) {
+            observeWeb2Credits()
+        }
         checkAndSendPendingMessage()
+        checkImmediateRateDialog()
     }
 
     private fun checkAndSendPendingMessage() {
@@ -122,11 +131,29 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private fun checkImmediateRateDialog() {
+        viewModelScope.launch {
+            if (RemoteConfigFlags.isShowRateDialogImmediately() && !preferences.isInAppReviewPrompted()) {
+                preferences.setInAppReviewPrompted()
+                _events.emit(ChatEvent.RequestInAppReview)
+            }
+        }
+    }
+
     private fun observeWeb3Credits() {
         viewModelScope.launch {
             web3CreditsUseCase.creditsFlow.collect { credits ->
                 _web3Credits.value = credits
                 Log.d(TAG, "Web3 credits updated: $credits")
+            }
+        }
+    }
+
+    private fun observeWeb2Credits() {
+        viewModelScope.launch {
+            web2CreditsUseCase.creditsFlow.collect { credits ->
+                _web2Credits.value = credits
+                Log.d(TAG, "Web2 credits updated: $credits (${Web2CreditsUseCase.formatCreditsShort(credits)})")
             }
         }
     }
@@ -421,16 +448,15 @@ class ChatViewModel @Inject constructor(
         }
 
         // Web2 flow below
-        // Premium users
-        if (state.hasPremiumAccess) {
+        val hasWeb2Credits = _web2Credits.value > 0
+
+        // Premium users OR users with credits
+        if (state.hasPremiumAccess || hasWeb2Credits) {
             // Still provisioning -> show config prompt (to show status)
             if (state.isProvisioning) {
                 Log.d(TAG, "Validation failed: still provisioning")
                 return SendValidationResult.ShowConfigPrompt
             }
-
-            // Note: For managed hosting, OpenClaw proxy is auto-activated, so no need to check AI provider
-            // The old check for aiProvider is removed since we auto-configure OpenClaw on instance ready
 
             // Not connected to gateway -> show config prompt
             if (!state.isConnected || state.isResolvingGatewayAccess) {
@@ -445,7 +471,7 @@ class ChatViewModel @Inject constructor(
             if (!state.hasAuthProvider) {
                 Log.w(TAG, "No auth provider in state, but gateway is connected; allowing send")
             }
-            Log.d(TAG, "Validation passed")
+            Log.d(TAG, "Validation passed (premium=${state.hasPremiumAccess}, web2Credits=$hasWeb2Credits)")
             return SendValidationResult.Allowed
         }
 
@@ -527,6 +553,14 @@ class ChatViewModel @Inject constructor(
             }
         }
 
+        // Deduct credit for web2 builds (if user has credits, not just subscription)
+        if (BuildConfig.IS_WEB2 && _web2Credits.value > 0) {
+            viewModelScope.launch {
+                web2CreditsUseCase.deductCredit()
+                Log.d(TAG, "Deducted credit for web2 message")
+            }
+        }
+
         // Store for retry
         lastUserMessage = trimmedText
 
@@ -561,6 +595,13 @@ class ChatViewModel @Inject constructor(
             chatRepository.saveMessages(updatedMessages)
             _events.emit(ChatEvent.MessageSent)
             _events.emit(ChatEvent.ScrollToBottom)
+
+            // Prompt in-app review after 10 user messages (once)
+            val userMsgCount = _uiState.value.userMessageCount
+            if (userMsgCount == 10 && !preferences.isInAppReviewPrompted()) {
+                preferences.setInAppReviewPrompted()
+                _events.emit(ChatEvent.RequestInAppReview)
+            }
         }
 
         // Send via gateway
@@ -612,7 +653,15 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun handleIncomingMessage(message: GatewayMessage) {
-        Log.d(TAG, "handleIncomingMessage: type=${message.type}")
+        Log.d(TAG, "handleIncomingMessage: type=${message.type}, runId=${message.runId}")
+
+        // Skip silent messages (e.g. integrations fetch)
+        val runId = message.runId
+        if (runId != null && runId in gatewayService.silentRunIds) {
+            Log.d(TAG, "Skipping silent runId: $runId")
+            gatewayService.silentRunIds.remove(runId)
+            return
+        }
 
         // Each incoming message = one response received
         pendingResponseCount = (pendingResponseCount - 1).coerceAtLeast(0)
@@ -640,14 +689,30 @@ class ChatViewModel @Inject constructor(
 
         // Only add assistant message if it's NOT a pure sign-request JSON
         if (!isSignRequestOnly) {
-            val assistantMessage = ChatMessage.assistantMessage(content)
-            val updatedMessages = _uiState.value.messages + assistantMessage
+            // Check for API key request tag
+            val apiKeyReq = parseApiKeyTag(content)
+            if (apiKeyReq != null) {
+                val cleaned = cleanApiKeyTagContent(content)
+                val newMessages = _uiState.value.messages.toMutableList()
+                if (cleaned.isNotEmpty()) {
+                    newMessages.add(ChatMessage.assistantMessage(cleaned))
+                }
+                newMessages.add(ChatMessage(
+                    content = "__api_key_request__:${apiKeyReq.keyName}:${apiKeyReq.skillKey}",
+                    isUser = false
+                ))
+                _uiState.update { it.copy(messages = newMessages, pendingApiKeyRequest = apiKeyReq) }
+                chatRepository.saveMessages(newMessages)
+            } else {
+                val assistantMessage = ChatMessage.assistantMessage(content)
+                val updatedMessages = _uiState.value.messages + assistantMessage
 
-            _uiState.update { it.copy(messages = updatedMessages) }
-            chatRepository.saveMessages(updatedMessages)
+                _uiState.update { it.copy(messages = updatedMessages) }
+                chatRepository.saveMessages(updatedMessages)
 
-            // Emit speak event for TTS
-            _events.emit(ChatEvent.SpeakText(content))
+                // Emit speak event for TTS
+                _events.emit(ChatEvent.SpeakText(content))
+            }
         }
 
         // Show sign request bubble AFTER assistant text
@@ -1076,6 +1141,53 @@ class ChatViewModel @Inject constructor(
     /**
      * Retry the last failed message
      */
+    // MARK: - API Key handling (same as setup wizard)
+
+    private fun parseApiKeyTag(content: String): ai.clawly.app.presentation.setupwizard.ApiKeyRequest? {
+        val regex = Regex("""<enter_api_key\s+name="([^"]+)"\s+skill="([^"]+)"\s*/>""")
+        val match = regex.find(content) ?: return null
+        return ai.clawly.app.presentation.setupwizard.ApiKeyRequest(
+            keyName = match.groupValues[1],
+            skillKey = match.groupValues[2]
+        )
+    }
+
+    private fun cleanApiKeyTagContent(content: String): String {
+        return content.replace(
+            Regex("""<enter_api_key\s+name="[^"]+"\s+skill="[^"]+"\s*/>"""),
+            ""
+        ).trim()
+    }
+
+    fun submitApiKey(value: String) {
+        val req = _uiState.value.pendingApiKeyRequest ?: return
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return
+
+        // Remove the key entry bubble
+        _uiState.update {
+            it.copy(
+                messages = it.messages.filterNot { msg ->
+                    msg.content.startsWith("__api_key_request__:")
+                },
+                pendingApiKeyRequest = null
+            )
+        }
+
+        // Send as /config set chat command — same as iOS
+        val configCommand = "/config set env.${req.keyName}=\"${trimmed}\""
+
+        val confirmMsg = ChatMessage.assistantMessage("API key ${req.keyName} saved.")
+        _uiState.update { it.copy(messages = it.messages + confirmMsg) }
+
+        viewModelScope.launch {
+            chatRepository.saveMessages(_uiState.value.messages)
+            gatewayService.sendMessage(message = configCommand).onFailure { error ->
+                Log.e(TAG, "Failed to send config command: ${error.message}")
+            }
+        }
+    }
+
     fun retryLastMessage() {
         analytics.trackChatRetryMessage(_uiState.value.thinkingLevel.name.lowercase())
 

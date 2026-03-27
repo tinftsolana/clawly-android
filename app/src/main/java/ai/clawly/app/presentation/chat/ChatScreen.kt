@@ -32,7 +32,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.flow.collectLatest
 import java.util.Locale
@@ -45,6 +51,7 @@ fun ChatScreen(
     onNavigateToPaywall: () -> Unit,
     onNavigateToProviderSetup: () -> Unit,
     onNavigateToLogin: () -> Unit = {},
+    onNavigateToSetupWizard: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -52,6 +59,10 @@ fun ChatScreen(
 
     var inputText by remember { mutableStateOf("") }
     var showGatewayResolvingAlert by remember { mutableStateOf(false) }
+    var showQuickActions by remember { mutableStateOf(false) }
+    var showApiKeySheet by remember { mutableStateOf(false) }
+    var showReviewDialog by remember { mutableStateOf(false) }
+    var apiKeyValue by remember { mutableStateOf("") }
     // Sign request state is now handled inline via message bubbles
 
     // Voice recording state
@@ -262,6 +273,9 @@ fun ChatScreen(
                 is ChatEvent.SpeakText -> {
                     // TTS integration - could inject TTSService here
                 }
+                is ChatEvent.RequestInAppReview -> {
+                    showReviewDialog = true
+                }
             }
         }
     }
@@ -275,6 +289,7 @@ fun ChatScreen(
     val listState = rememberAutoScrollState(
         messages = uiState.messages,
         isTyping = uiState.isAssistantTyping,
+        streamingContent = uiState.streamingContent,
         imeVisible = imeVisible
     )
 
@@ -289,6 +304,7 @@ fun ChatScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ClawlyColors.background)
+            .imePadding()
     ) {
         // Top radial glow effect (background layer)
         BoxWithConstraints(
@@ -317,79 +333,76 @@ fun ChatScreen(
             )
         }
 
-        // Content layer - fills entire screen, scrolls under bars
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-        ) {
-            if (uiState.messages.isEmpty() && !uiState.isAssistantTyping) {
-                EmptyState(
-                    onSuggestionClick = { suggestion ->
-                        inputText = suggestion
-                        viewModel.sendMessage(suggestion)
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .padding(top = topBarHeight)
-                )
-            } else {
-                MessageList(
-                    messages = uiState.messages,
-                    isAssistantTyping = uiState.isAssistantTyping,
-                    streamingContent = uiState.streamingContent,
-                    onRetry = { viewModel.retryLastMessage() },
-                    onReconnect = { viewModel.reconnect() },
-                    onTopUpCreditsClick = onNavigateToPaywall,
-                    onSignRequest = { viewModel.approveSignRequest() },
-                    onRejectSignRequest = { viewModel.rejectSignRequest() },
-                    onOpenSolscan = { signature ->
-                        val url = "https://solscan.io/tx/$signature"
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    },
-                    listState = listState,
-                    contentPadding = PaddingValues(
-                        top = topBarHeight + 48.dp,
-                        bottom = bottomBarHeight + 16.dp
-                    ),
-                    modifier = Modifier.fillMaxSize()
+        // Content layer
+        if (uiState.messages.isEmpty() && !uiState.isAssistantTyping) {
+            EmptyState(
+                onSuggestionClick = { suggestion ->
+                    inputText = suggestion
+                    viewModel.sendMessage(suggestion)
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(top = topBarHeight)
+            )
+        } else {
+            MessageList(
+                messages = uiState.messages,
+                isAssistantTyping = uiState.isAssistantTyping,
+                streamingContent = uiState.streamingContent,
+                onRetry = { viewModel.retryLastMessage() },
+                onReconnect = { viewModel.reconnect() },
+                onTopUpCreditsClick = onNavigateToPaywall,
+                onSignRequest = { viewModel.approveSignRequest() },
+                onRejectSignRequest = { viewModel.rejectSignRequest() },
+                onOpenSolscan = { signature ->
+                    val url = "https://solscan.io/tx/$signature"
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                },
+                onApiKeyClick = if (uiState.pendingApiKeyRequest != null) {
+                    { showApiKeySheet = true }
+                } else null,
+                listState = listState,
+                contentPadding = PaddingValues(
+                    top = topBarHeight + 48.dp,
+                    bottom = bottomBarHeight + 16.dp
+                ),
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        if (uiState.isResolvingGatewayAccess) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = topBarHeight + 12.dp, start = 16.dp, end = 16.dp),
+                color = Color(0xFFFF9500).copy(alpha = 0.16f),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text(
+                    text = "Pairing in progress. Reconnecting...",
+                    color = Color(0xFFFFC15E),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                 )
             }
+        }
 
-            if (uiState.isResolvingGatewayAccess) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = topBarHeight + 12.dp, start = 16.dp, end = 16.dp),
-                    color = Color(0xFFFF9500).copy(alpha = 0.16f),
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Text(
-                        text = "Pairing in progress. Reconnecting...",
-                        color = Color(0xFFFFC15E),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
-                }
-            }
-
-            // Error snackbar
-            if (uiState.showError && uiState.error != null) {
-                Snackbar(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = bottomBarHeight + 48.dp)
-                        .padding(horizontal = 16.dp),
-                    containerColor = ClawlyColors.error,
-                    action = {
-                        TextButton(onClick = { viewModel.dismissError() }) {
-                            Text("Dismiss", color = Color.White)
-                        }
+        // Error snackbar
+        if (uiState.showError && uiState.error != null) {
+            Snackbar(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomBarHeight + 48.dp)
+                    .padding(horizontal = 16.dp),
+                containerColor = ClawlyColors.error,
+                action = {
+                    TextButton(onClick = { viewModel.dismissError() }) {
+                        Text("Dismiss", color = Color.White)
                     }
-                ) {
-                    Text(uiState.error!!, color = Color.White)
                 }
+            ) {
+                Text(uiState.error!!, color = Color.White)
             }
         }
 
@@ -420,12 +433,11 @@ fun ChatScreen(
             )
         }
 
-        // Bottom input bar - floating with subtle gradient fade
+        // Bottom input bar
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .imePadding()
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
@@ -444,14 +456,10 @@ fun ChatScreen(
                 onSend = {
                     if (inputText.isNotBlank() || uiState.pendingAttachments.isNotEmpty()) {
                         viewModel.sendMessage(inputText)
-                        // Don't clear here — MessageSent event clears inputText
-                        // so the message stays in the field if validation fails
                     }
                 },
                 onAddAttachment = {
-                    photoPickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
+                    showQuickActions = true
                 },
                 onRemoveAttachment = { viewModel.removeAttachment(it) },
                 onAbort = { viewModel.abortResponse() },
@@ -482,5 +490,136 @@ fun ChatScreen(
         )
     }
 
-    // Sign request and success dialogs removed — now handled inline via SignRequestBubble in MessageList
+    // Quick Actions Sheet
+    if (showQuickActions) {
+        QuickActionsSheet(
+            onDismiss = { showQuickActions = false },
+            onSelectPhoto = {
+                photoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onSelectIntegration = onNavigateToSetupWizard,
+            onSendQuickAction = { fullPrompt, displayText ->
+                viewModel.sendMessage(fullPrompt)
+            }
+        )
+    }
+
+    // API Key Entry Bottom Sheet
+    if (showApiKeySheet) {
+        @OptIn(ExperimentalMaterial3Api::class)
+        ModalBottomSheet(
+            onDismissRequest = {
+                showApiKeySheet = false
+                apiKeyValue = ""
+            },
+            containerColor = ClawlyColors.surface,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = ClawlyColors.accentPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                uiState.pendingApiKeyRequest?.let { req ->
+                    Text(
+                        text = req.keyName,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ClawlyColors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "for ${req.skillKey}",
+                        fontSize = 14.sp,
+                        color = ClawlyColors.secondaryText
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                OutlinedTextField(
+                    value = apiKeyValue,
+                    onValueChange = { apiKeyValue = it },
+                    placeholder = {
+                        Text("Paste your API key here", color = ClawlyColors.textMuted)
+                    },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = ClawlyColors.textPrimary,
+                        unfocusedTextColor = ClawlyColors.textPrimary,
+                        cursorColor = ClawlyColors.accentPrimary,
+                        focusedBorderColor = Color.White.copy(alpha = 0.1f),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                        focusedContainerColor = ClawlyColors.surfaceElevated,
+                        unfocusedContainerColor = ClawlyColors.surfaceElevated
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = {
+                        viewModel.submitApiKey(apiKeyValue)
+                        showApiKeySheet = false
+                        apiKeyValue = ""
+                    },
+                    enabled = apiKeyValue.trim().isNotEmpty(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ClawlyColors.accentPrimary,
+                        disabledContainerColor = ClawlyColors.accentPrimary.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Text(
+                        text = "Save Key",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+
+    // In-App Review Dialog
+    if (showReviewDialog) {
+        val activity = context as? android.app.Activity
+        AlertDialog(
+            onDismissRequest = { showReviewDialog = false },
+            title = { Text("Enjoying Clawly AI?", color = ClawlyColors.textPrimary) },
+            text = { Text("We'd love to hear your feedback!", color = ClawlyColors.secondaryText) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showReviewDialog = false
+                    activity?.let {
+                        val manager = com.google.android.play.core.review.ReviewManagerFactory.create(it)
+                        manager.requestReviewFlow().addOnSuccessListener { reviewInfo ->
+                            manager.launchReviewFlow(it, reviewInfo)
+                        }
+                    }
+                }) {
+                    Text("Yes, rate it!", color = ClawlyColors.accentPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReviewDialog = false }) {
+                    Text("Not now", color = ClawlyColors.secondaryText)
+                }
+            },
+            containerColor = ClawlyColors.surface
+        )
+    }
 }

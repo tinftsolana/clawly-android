@@ -110,6 +110,8 @@ class GatewayServiceImpl @Inject constructor(
     private val _pairingRequested = MutableSharedFlow<String>(extraBufferCapacity = 1)
     override val pairingRequested: Flow<String> = _pairingRequested.asSharedFlow()
 
+    override val silentRunIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     private data class PendingRequest(
         val resolve: (JsonObject?) -> Unit,
         val reject: (Exception) -> Unit
@@ -719,7 +721,7 @@ class GatewayServiceImpl @Inject constructor(
             Log.e(TAG, "Chat error from server: $errorMessage (runId=$runId)")
             _streamingState.value = StreamingState.Complete
             _incomingMessages.emit(
-                GatewayMessage("chat.error", GatewayPayload(content = "Error: $errorMessage"), runId = runId)
+                GatewayMessage("chat", GatewayPayload(content = "Error: $errorMessage"), runId = runId)
             )
             delay(100)
             _streamingState.value = StreamingState.Idle
@@ -738,7 +740,7 @@ class GatewayServiceImpl @Inject constructor(
                 _streamingState.value = StreamingState.Complete
                 if (content.isNotEmpty()) {
                     _incomingMessages.emit(
-                        GatewayMessage("chat.final", GatewayPayload(content = content), runId = runId)
+                        GatewayMessage("chat", GatewayPayload(content = content), runId = runId)
                     )
                 }
                 delay(100)
@@ -748,7 +750,7 @@ class GatewayServiceImpl @Inject constructor(
                 Log.d(TAG, "Chat aborted (runId=$runId)")
                 _streamingState.value = StreamingState.Complete
                 _incomingMessages.emit(
-                    GatewayMessage("chat.aborted", runId = runId)
+                    GatewayMessage("chat", runId = runId)
                 )
                 delay(100)
                 _streamingState.value = StreamingState.Idle

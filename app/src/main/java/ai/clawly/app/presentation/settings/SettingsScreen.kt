@@ -7,6 +7,7 @@ import ai.clawly.app.ui.util.DrawIfWeb3
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -95,7 +96,15 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(40.dp))
+
+            UsageSummaryCard(
+                creditsText = if (uiState.isLoadingCredits) "—" else uiState.creditsFormatted,
+                pointsText = if (uiState.isLoadingCredits) "—" else uiState.pointsFormatted,
+                isLoading = uiState.isLoadingCredits,
+                onRefresh = { viewModel.fetchCredits() }
+            )
+
 
             // Wallet section (Web3 only)
             DrawIfWeb3 {
@@ -289,6 +298,96 @@ private fun SettingsToggleItemSimple(
                 uncheckedThumbColor = Color.White,
                 uncheckedTrackColor = ClawlyColors.surfaceBorder
             )
+        )
+    }
+}
+
+@Composable
+private fun UsageSummaryCard(
+    creditsText: String,
+    pointsText: String,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(ClawlyColors.surface)
+            .padding(20.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Clawly Points",
+                color = ClawlyColors.textPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = ClawlyColors.accentPrimary,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh credits",
+                        tint = ClawlyColors.textMuted
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            MetricColumn(
+                label = "Credits",
+                value = creditsText,
+                suffix = "",
+                highlight = ClawlyColors.accentPrimary
+            )
+            MetricColumn(
+                label = "Points",
+                value = pointsText,
+                suffix = " pts",
+                highlight = ClawlyColors.terminalGreen
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.MetricColumn(
+    label: String,
+    value: String,
+    suffix: String,
+    highlight: Color
+) {
+    Column(
+        modifier = Modifier.weight(1f)
+    ) {
+        Text(
+            text = label.uppercase(),
+            color = ClawlyColors.textMuted,
+            fontSize = 12.sp,
+            letterSpacing = 1.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = value + suffix,
+            color = highlight,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }

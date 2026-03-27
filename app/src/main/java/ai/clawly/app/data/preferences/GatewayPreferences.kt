@@ -60,6 +60,10 @@ class GatewayPreferences @Inject constructor(
         private val KEY_DEBUG_PREMIUM_ACTIVE = booleanPreferencesKey("debug_premium_active")
         private val KEY_BACKEND_USER_ID = stringPreferencesKey("backend_user_id")
         private val KEY_DEVICE_INSTANCE_ID = stringPreferencesKey("device_instance_id")
+        private val KEY_IN_APP_REVIEW_PROMPTED = booleanPreferencesKey("in_app_review_prompted")
+        private val KEY_NOTIFICATION_PERMISSION_REQUESTED = booleanPreferencesKey("notification_permission_requested")
+        private val KEY_LAST_PUSH_TOKEN = stringPreferencesKey("last_push_token")
+        private val KEY_LAST_PUSH_USER_ID = stringPreferencesKey("last_push_user_id")
     }
 
     // Gateway URL
@@ -543,5 +547,48 @@ class GatewayPreferences @Inject constructor(
 
     suspend fun getInstanceIdSync(): String? {
         return dataStore.data.first()[KEY_DEVICE_INSTANCE_ID]
+    }
+
+    // In-App Review
+    suspend fun isInAppReviewPrompted(): Boolean {
+        return dataStore.data.first()[KEY_IN_APP_REVIEW_PROMPTED] ?: false
+    }
+
+    suspend fun setInAppReviewPrompted() {
+        dataStore.edit { prefs ->
+            prefs[KEY_IN_APP_REVIEW_PROMPTED] = true
+        }
+    }
+
+    suspend fun isNotificationPermissionRequested(): Boolean {
+        return dataStore.data.first()[KEY_NOTIFICATION_PERMISSION_REQUESTED] ?: false
+    }
+
+    suspend fun setNotificationPermissionRequested(requested: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_NOTIFICATION_PERMISSION_REQUESTED] = requested
+        }
+    }
+
+    suspend fun getLastPushTokenSync(): String? {
+        return dataStore.data.first()[KEY_LAST_PUSH_TOKEN]
+    }
+
+    suspend fun getLastPushUserIdSync(): String? {
+        return dataStore.data.first()[KEY_LAST_PUSH_USER_ID]
+    }
+
+    suspend fun setLastPushRegistration(token: String, userId: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_LAST_PUSH_TOKEN] = token
+            prefs[KEY_LAST_PUSH_USER_ID] = userId
+        }
+    }
+
+    suspend fun clearLastPushRegistration() {
+        dataStore.edit { prefs ->
+            prefs.remove(KEY_LAST_PUSH_TOKEN)
+            prefs.remove(KEY_LAST_PUSH_USER_ID)
+        }
     }
 }

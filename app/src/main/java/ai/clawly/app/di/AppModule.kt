@@ -1,6 +1,7 @@
 package ai.clawly.app.di
 
 import ai.clawly.app.analytics.AmplitudeAnalyticsService
+import ai.clawly.app.analytics.AnalyticsTracker
 import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.service.PurchaseService
 import ai.clawly.app.data.service.TTSService
@@ -32,6 +33,12 @@ object AppModule {
     ): AmplitudeAnalyticsService {
         return AmplitudeAnalyticsService(context)
     }
+
+    @Provides
+    @Singleton
+    fun provideAnalyticsTracker(
+        service: AmplitudeAnalyticsService
+    ): AnalyticsTracker = service
 
     @Provides
     @Singleton

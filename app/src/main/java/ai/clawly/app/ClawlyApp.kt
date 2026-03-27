@@ -7,7 +7,10 @@ import ai.clawly.app.data.preferences.GatewayPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.remote.gateway.DeviceIdentityManager
 import ai.clawly.app.data.service.PurchaseService
+import ai.clawly.app.domain.usecase.Web2CreditsUseCase
 import ai.clawly.app.navigation.ClawlyNavHost
+import ai.clawly.app.notifications.NotificationPermissionHelper
+import ai.clawly.app.notifications.RequestNotificationPermission
 import ai.clawly.app.ui.theme.ClawlyColors
 import android.util.Log
 import com.revenuecat.purchases.Purchases
@@ -17,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -40,7 +44,8 @@ class AppViewModel @Inject constructor(
     private val firebaseAuthService: FirebaseAuthService,
     private val purchaseService: PurchaseService,
     private val controlPlaneService: ControlPlaneService,
-    private val deviceIdentityManager: DeviceIdentityManager
+    private val deviceIdentityManager: DeviceIdentityManager,
+    private val web2CreditsUseCase: Web2CreditsUseCase
 ) : ViewModel() {
     companion object {
         private const val TAG = "AppViewModel"
@@ -112,6 +117,7 @@ class AppViewModel @Inject constructor(
             controlPlaneService.syncPurchases(userId).fold(
                 onSuccess = { credits ->
                     Log.d(TAG, "Startup sync-purchases success: credits=$credits")
+                    web2CreditsUseCase.setCredits(credits)
                 },
                 onFailure = { e ->
                     Log.e(TAG, "Startup sync-purchases failed", e)
@@ -163,9 +169,16 @@ class AppViewModel @Inject constructor(
  */
 @Composable
 fun ClawlyApp(
-    viewModel: AppViewModel = hiltViewModel()
+    viewModel: AppViewModel = hiltViewModel(),
+    notificationPermissionHelper: NotificationPermissionHelper
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    var shouldRequestNotifications by remember { mutableStateOf(false) }
+
+    LaunchedEffect(notificationPermissionHelper, context) {
+        shouldRequestNotifications = notificationPermissionHelper.shouldShowPermissionDialog(context)
+    }
 
     if (uiState.isLoading) {
         // Show loading state while checking onboarding status
@@ -183,5 +196,14 @@ fun ClawlyApp(
             isFirebaseSignedIn = uiState.isFirebaseSignedIn,
             onOnboardingComplete = { viewModel.completeOnboarding() }
         )
+    }
+
+    if (shouldRequestNotifications) {
+        RequestNotificationPermission(
+            permissionHelper = notificationPermissionHelper,
+            context = context
+        ) {
+            shouldRequestNotifications = false
+        }
     }
 }

@@ -19,6 +19,7 @@ data class ChatUiState(
     val showError: Boolean = false,
     val showConfigPrompt: Boolean = false,
     val pendingAttachments: List<PendingAttachment> = emptyList(),
+    val pendingApiKeyRequest: ai.clawly.app.presentation.setupwizard.ApiKeyRequest? = null,
     val isRecording: Boolean = false,
     val recordingRmsLevel: Float = 0f,
     val partialRecognitionText: String = ""

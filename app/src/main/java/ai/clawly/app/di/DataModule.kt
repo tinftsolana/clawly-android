@@ -7,8 +7,10 @@ import ai.clawly.app.data.preferences.SolanaAuthPreferences
 import ai.clawly.app.data.remote.ControlPlaneService
 import ai.clawly.app.data.repository.AuthProviderRepositoryImpl
 import ai.clawly.app.data.repository.ChatRepositoryImpl
+import ai.clawly.app.data.repository.CreditsRepositoryImpl
 import ai.clawly.app.domain.repository.AuthProviderRepository
 import ai.clawly.app.domain.repository.ChatRepository
+import ai.clawly.app.domain.repository.CreditsRepository
 import android.content.Context
 import dagger.Module
 import dagger.Provides
@@ -53,5 +55,13 @@ object DataModule {
         repositoryImpl: AuthProviderRepositoryImpl
     ): AuthProviderRepository {
         return repositoryImpl
+    }
+
+    @Provides
+    @Singleton
+    fun provideCreditsRepository(
+        @ApplicationContext context: Context
+    ): CreditsRepository {
+        return CreditsRepositoryImpl(context)
     }
 }
